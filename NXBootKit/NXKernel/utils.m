@@ -341,6 +341,18 @@ static bool kwrite32_retry(uint64_t address, uint32_t value, int attempts) {
     return false;
 }
 
+static bool kwrite64_retry(uint64_t address, uint64_t value, int attempts) {
+    if (attempts < 1) attempts = 1;
+    for (int i = 0; i < attempts; i++) {
+        ds_kwrite64(address, value);
+        if (ds_kread64(address) == value) {
+            return true;
+        }
+        usleep(2000);
+    }
+    return false;
+}
+
 static int prepareIOKitAccess(void) {
     if (!ds_is_ready()) {
         kernel_logf("prepareIOKitAccess: darksword not ready");
@@ -426,22 +438,14 @@ static int prepareIOKitAccess(void) {
 
     bool hadNonCriticalFailures = false;
 
-    struct {
-        uint32_t offset;
-        uint32_t value;
-        const char *name;
-    } ucredWrites[] = {
-        { 0x18, 0, "cr_uid" },
-        { 0x1c, 0, "cr_gid" },
-        { 0x20, 0, "cr_ruid" },
-        { 0x24, 0, "cr_rgid" },
-    };
-
-    for (size_t i = 0; i < sizeof(ucredWrites) / sizeof(ucredWrites[0]); i++) {
-        if (!kwrite32_retry(ucred + ucredWrites[i].offset, ucredWrites[i].value, 8)) {
-            kernel_logf("prepareIOKitAccess: %s verify failed (non-critical)", ucredWrites[i].name);
-            hadNonCriticalFailures = true;
-        }
+    // Patch uid/gid pairs with aligned 64-bit writes for better primitive reliability.
+    if (!kwrite64_retry(ucred + 0x18, 0, 8)) {
+        kernel_logf("prepareIOKitAccess: cr_uid/cr_gid pair verify failed (non-critical)");
+        hadNonCriticalFailures = true;
+    }
+    if (!kwrite64_retry(ucred + 0x20, 0, 8)) {
+        kernel_logf("prepareIOKitAccess: cr_ruid/cr_rgid pair verify failed (non-critical)");
+        hadNonCriticalFailures = true;
     }
 
     if (!hadNonCriticalFailures) {
