@@ -6,6 +6,7 @@
 #import "utils.h"
 #import "darksword.h"
 #import "xpf.h"
+#import "offsets.h"
 
 #import <Foundation/Foundation.h>
 #import <stdio.h>
