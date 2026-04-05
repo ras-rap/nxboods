@@ -20,8 +20,8 @@
 		NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000B /* libgrabkernel2.dylib */; };
 		NXK000000000000000000000E /* libxpf.dylib in Embed Dylibs */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000A /* libxpf.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		NXK000000000000000000000F /* libgrabkernel2.dylib in Embed Dylibs */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000B /* libgrabkernel2.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		NXK0000000000000000000010 /* sbx.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK3000000000000000000010 /* sbx.h */; };
-		NXK0000000000000000000013 /* sbx.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK3000000000000000000011 /* sbx.m */; };
+		NXK00000000000000000001A0 /* sbx.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK3000000000000000000010 /* sbx.h */; };
+		NXK00000000000000000001A1 /* sbx.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK3000000000000000000011 /* sbx.m */; };
 		NXK000000000000000000000C /* xpf.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000C /* xpf.h */; };
 		NXK000000000000000000000D /* libgrabkernel2.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000D /* libgrabkernel2.h */; };
 		NXK000000000000000000000E /* arm64.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000E /* arm64.h */; };
@@ -610,7 +610,7 @@
 				NXK0000000000000000000005 /* darksword.m in Sources */,
 				NXK0000000000000000000007 /* utils.m in Sources */,
 				NXK0000000000000000000009 /* offsets.m in Sources */,
-				NXK0000000000000000000013 /* sbx.m in Sources */,
+				NXK00000000000000000001A1 /* sbx.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -651,7 +651,7 @@
 				NXK0000000000000000000005 /* darksword.m in Sources */,
 				NXK0000000000000000000007 /* utils.m in Sources */,
 				NXK0000000000000000000009 /* offsets.m in Sources */,
-				NXK0000000000000000000013 /* sbx.m in Sources */,
+				NXK00000000000000000001A1 /* sbx.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -896,7 +896,10 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
-				SYSTEM_FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/System/Frameworks-$(PLATFORM_NAME)";
+				SYSTEM_FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/System/Frameworks-$(PLATFORM_NAME)",
+				);
 				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/System/include";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -966,7 +969,10 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
-				SYSTEM_FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/System/Frameworks-$(PLATFORM_NAME)";
+				SYSTEM_FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/System/Frameworks-$(PLATFORM_NAME)",
+				);
 				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/System/include";
 				VALIDATE_PRODUCT = YES;
 				LIBRARY_SEARCH_PATHS = (
