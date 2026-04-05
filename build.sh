@@ -54,9 +54,6 @@ CoreDataGenerated=DerivedData/NXBoot/Build/Intermediates.noindex/NXBoot.build/Re
   -INXBootKit/NXKernel/choma \
   -F$releasedir \
   -F NXBootKit/NXKernel/lib \
-  -framework AppCenter \
-  -framework AppCenterAnalytics \
-  -framework AppCenterCrashes \
   -framework WebKit \
   -framework xpf \
   -framework grabkernel2 \

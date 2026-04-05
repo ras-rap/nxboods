@@ -2,16 +2,9 @@
 #import "PayloadStorage.h"
 #import "Settings.h"
 
-@import AppCenter;
-@import AppCenterAnalytics;
-@import AppCenterCrashes;
-
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-    if (Settings.appCenterSupported) {
-        [MSACAppCenter start:@"0665136b-48d8-4d13-98f9-1d21a3dbcd59" withServices:@[MSACAnalytics.class, MSACCrashes.class]];
-    }
     return YES;
 }
 

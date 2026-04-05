@@ -6,8 +6,6 @@
 #import "PayloadStorage.h"
 #import "Settings.h"
 
-@import AppCenterAnalytics;
-
 @interface MainViewController () <
         NXUSBDeviceEnumeratorDelegate,
         UIAdaptivePresentationControllerDelegate,
@@ -117,12 +115,8 @@
         [self updateDeviceStatus:@"Payload injection error"];
     }
 
-    if (Settings.allowUsagePings) {
-        if (error) {
-            [MSACAnalytics trackEvent:@"SwitchBootFailure" withProperties:@{@"error": error}];
-        } else {
-            [MSACAnalytics trackEvent:@"SwitchBootSuccess"];
-        }
+    if (error) {
+        NSLog(@"Switch boot failed: %@", error);
     }
 }
 

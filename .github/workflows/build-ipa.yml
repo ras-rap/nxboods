@@ -26,7 +26,6 @@ jobs:
       - name: Install dependencies
         run: |
           brew install ldid
-          gem install xcpretty
 
       - name: Build IPA
         run: |
@@ -50,7 +49,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_STYLE=Manual \
-            2>&1 | xcpretty
+            2>&1 | tee xcodebuild.log
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "xcodebuild failed, showing last 100 lines:"
+            tail -n 100 xcodebuild.log
+            exit 1
+          fi
 
           # Prepare IPA
           releasedir="build/DerivedData/NXBoot/Build/Products/Release-iphoneos"
