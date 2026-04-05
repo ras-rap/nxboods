@@ -6,9 +6,7 @@
 #import <IOKit/usb/IOUSBLib.h>
 #import <mach/mach.h>
 #import <TargetConditionals.h>
-
-extern const CFUUIDRef kIOUSBHostDeviceUserClientTypeID __attribute__((weak_import));
-extern const CFUUIDRef kIOUSBHostDeviceInterfaceID __attribute__((weak_import));
+#import <dlfcn.h>
 
 #ifndef NXBOOTMAC_BUILDING
 // use kIOMasterPortDefault for NXBoot iOS and command line builds for compatibility
@@ -43,6 +41,14 @@ static void bridgeDeviceNotification(void *u, io_service_t service, natural_t me
     NXUSBDevice *device = (__bridge NXUSBDevice *)u;
     NXUSBDeviceEnumerator *deviceEnum = device.parentEnum;
     [deviceEnum handleDeviceNotification:device forService:service messageType:messageType messageArg:messageArg];
+}
+
+static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
+    const CFUUIDRef *uuidPtr = (const CFUUIDRef *)dlsym(RTLD_DEFAULT, symbolName);
+    if (!uuidPtr) {
+        return NULL;
+    }
+    return *uuidPtr;
 }
 
 @implementation NXUSBDeviceEnumerator
@@ -141,8 +147,10 @@ static void bridgeDeviceNotification(void *u, io_service_t service, natural_t me
         (void)IOObjectGetClass(service, ioClassName);
 
         BOOL classIsHostDevice = (strcmp(ioClassName, "IOUSBHostDevice") == 0);
-        const CFUUIDRef preferredUserClient = (classIsHostDevice && kIOUSBHostDeviceUserClientTypeID)
-            ? kIOUSBHostDeviceUserClientTypeID
+        CFUUIDRef hostUserClientTypeID = NXLookupHostUUIDSymbol("kIOUSBHostDeviceUserClientTypeID");
+        CFUUIDRef hostInterfaceID = NXLookupHostUUIDSymbol("kIOUSBHostDeviceInterfaceID");
+        const CFUUIDRef preferredUserClient = (classIsHostDevice && hostUserClientTypeID)
+            ? hostUserClientTypeID
             : kIOUSBDeviceUserClientTypeID;
 
         kr = IOCreatePlugInInterfaceForService(service,
@@ -169,10 +177,10 @@ static void bridgeDeviceNotification(void *u, io_service_t service, natural_t me
                                                 CFUUIDGetUUIDBytes(kNXUSBDeviceInterfaceUUID),
                                                 (void *)&device->_intf);
 
-        if ((kr || !device->_intf) && classIsHostDevice && kIOUSBHostDeviceInterfaceID) {
+        if ((kr || !device->_intf) && classIsHostDevice && hostInterfaceID) {
             NXLog(@"USB: legacy device interface query failed (%08x), retrying host interface UUID", kr);
             kr = (*plugInInterface)->QueryInterface(plugInInterface,
-                                                    CFUUIDGetUUIDBytes(kIOUSBHostDeviceInterfaceID),
+                                                    CFUUIDGetUUIDBytes(hostInterfaceID),
                                                     (void *)&device->_intf);
         }
 
