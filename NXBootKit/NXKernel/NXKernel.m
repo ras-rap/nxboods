@@ -110,7 +110,7 @@ uint64_t NXKernelProcByName(const char *name) {
 }
 
 int NXKernelSandboxEscape(void) {
-    return sbx_escape(ds_get_our_proc());
+    return patchcsflags();
 }
 
 bool NXKernelIsSupported(void) {

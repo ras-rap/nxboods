@@ -30,7 +30,6 @@ int toggleaslr(void);
 
 int killproc(const char* name);
 int patchcsflags(void);
-int patchcsflags(void);
 
 #ifdef __cplusplus
 }
