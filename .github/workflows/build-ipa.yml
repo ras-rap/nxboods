@@ -63,6 +63,29 @@ jobs:
           test -f "NXBoot/NXBootJailbreak.entitlements"
           test -f "$releasedir/NXBoot.app/NXBoot"
 
+          # Sign the binary
+          ldid -I"$bundleid" -Cadhoc -SNXBoot/NXBootJailbreak.entitlements "$releasedir/NXBoot.app/NXBoot"
+
+          # Remove provisioning profile if present
+          rm -f "$releasedir/NXBoot.app/embedded.mobileprovision"
+
+          # Create IPA
+          mkdir -p DerivedData/ipa/Payload
+          ditto "$releasedir/NXBoot.app" DerivedData/ipa/Payload/NXBoot.app
+
+          mkdir -p dist
+          tipa="dist/NXBoot_${version}-${buildno}.tipa"
+          rm -f "$tipa"
+          (cd DerivedData/ipa && COPYFILE_DISABLE=1 zip -r "../../$tipa" "Payload" -x "._*" -x ".DS_Store" -x "__MACOSX")
+
+          # Export dSYM
+          if [ -d "$releasedir/NXBoot.app.dSYM" ]; then
+            ditto "$releasedir/NXBoot.app.dSYM" "dist/NXBoot_${version}-${buildno}.app.dSYM"
+          fi
+
+          echo "IPA built: $tipa"
+          ls -la dist/
+
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
