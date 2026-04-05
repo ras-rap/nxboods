@@ -18,6 +18,8 @@
 		NXK0000000000000000000009 /* offsets.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000009 /* offsets.m */; };
 		NXK000000000000000000000A /* libxpf.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000A /* libxpf.dylib */; };
 		NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000B /* libgrabkernel2.dylib */; };
+		NXK000000000000000000000E /* libxpf.dylib in Embed Dylibs */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000A /* libxpf.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		NXK000000000000000000000F /* libgrabkernel2.dylib in Embed Dylibs */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000B /* libgrabkernel2.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		NXK000000000000000000000C /* xpf.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000C /* xpf.h */; };
 		NXK000000000000000000000D /* libgrabkernel2.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000D /* libgrabkernel2.h */; };
 		NXK000000000000000000000E /* arm64.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000E /* arm64.h */; };
@@ -104,16 +106,18 @@
 			runOnlyForDeploymentPostprocessing = 1;
 		};
 		A7CD57CD2556F591006AA85B /* Embed Dylibs */ = {
-			isa = PBXCopyFilesBuildPhase;
+			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
 			files = (
-				NXK000000000000000000000A /* libxpf.dylib in Frameworks */,
-				NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */,
+			);
+			inputPaths = (
 			);
 			name = "Embed Dylibs";
+			outputPaths = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "mkdir -p \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\ncp -f \"$PROJECT_DIR/NXBootKit/NXKernel/lib/libxpf.dylib\" \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/\"\ncp -f \"$PROJECT_DIR/NXBootKit/NXKernel/lib/libgrabkernel2.dylib\" \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/\"\n";
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -857,7 +861,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -930,7 +934,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
