@@ -381,14 +381,22 @@ static int prepareIOKitAccess(void) {
         return -1;
     }
 
-    uint32_t taskOff = find_task_offset(self);
-    uint64_t task = normalize_kernel_ptr(ds_kread64(self + taskOff));
+    uint64_t task = normalize_kernel_ptr(ds_get_our_task());
+    uint32_t taskOff = 0;
+    if (!is_kptr(task)) {
+        taskOff = find_task_offset(self);
+        task = normalize_kernel_ptr(ds_kread64(self + taskOff));
+    }
     if (!is_kptr(task)) {
         kernel_logf("prepareIOKitAccess: invalid task pointer");
         return -1;
     }
 
-    kernel_logf("prepareIOKitAccess: task offset = 0x%x", taskOff);
+    if (taskOff) {
+        kernel_logf("prepareIOKitAccess: task offset = 0x%x", taskOff);
+    } else {
+        kernel_logf("prepareIOKitAccess: using ds_get_our_task() task pointer");
+    }
 
     uint32_t oldCsflags = ds_kread32(self + csflagsOff);
     uint32_t newCsflags = oldCsflags |
