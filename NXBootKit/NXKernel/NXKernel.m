@@ -112,9 +112,6 @@ uint64_t NXKernelProcByName(const char *name) {
 
 int NXKernelSandboxEscape(void) {
     int patchResult = patchcsflags();
-    if (patchResult == 0) {
-        return 0;
-    }
 
     uint64_t selfProc = ds_get_our_proc();
     if (!selfProc) {
@@ -122,7 +119,7 @@ int NXKernelSandboxEscape(void) {
     }
 
     int sbxResult = sbx_escape(selfProc);
-    if (sbxResult == 0) {
+    if (patchResult == 0 || sbxResult == 0) {
         return 0;
     }
 

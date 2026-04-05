@@ -12,6 +12,7 @@
 #import <stdio.h>
 #import <unistd.h>
 #import <string.h>
+#include <stdarg.h>
 #import <sys/types.h>
 #include <sys/sysctl.h>
 #include <stdint.h>
@@ -147,6 +148,24 @@ static bool is_kptr(uint64_t p) {
     return (p & 0xffff000000000000ULL) == 0xffff000000000000ULL;
 }
 
+static void kernel_logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void kernel_logf(const char *fmt, ...) {
+    char buffer[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, ap);
+    va_end(ap);
+
+    printf("%s\n", buffer);
+
+    NSString *msg = [NSString stringWithUTF8String:buffer];
+    if (!msg) return;
+
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelLog"
+                                                        object:nil
+                                                      userInfo:@{ @"message": msg }];
+}
+
 static uint64_t procsize_or_default(void) {
     uint64_t procsize = getprocsize();
     if (!procsize) {
@@ -255,13 +274,15 @@ static uint32_t find_task_flags_offset(uint64_t task) {
 
 static int prepareIOKitAccess(void) {
     if (!ds_is_ready()) {
-        printf("darksword not ready\n");
+        kernel_logf("prepareIOKitAccess: darksword not ready");
         return -1;
     }
 
+    kernel_logf("prepareIOKitAccess: starting process patching");
+
     uint64_t self = ourproc();
     if (!self) {
-        printf("prepareIOKitAccess: could not resolve our proc\n");
+        kernel_logf("prepareIOKitAccess: could not resolve our proc");
         return -1;
     }
 
@@ -270,31 +291,37 @@ static int prepareIOKitAccess(void) {
         csflagsOff = find_csflags_offset(self);
     }
     if (!csflagsOff) {
-        printf("prepareIOKitAccess: could not resolve csflags offset\n");
+        kernel_logf("prepareIOKitAccess: could not resolve csflags offset");
         return -1;
     }
+
+    kernel_logf("prepareIOKitAccess: csflags offset = 0x%x", csflagsOff);
 
     uint32_t ucredOff = (uint32_t)getucredooffset();
     if (!ucredOff) {
         ucredOff = find_ucred_offset(self);
     }
     if (!ucredOff) {
-        printf("prepareIOKitAccess: could not resolve ucred offset\n");
+        kernel_logf("prepareIOKitAccess: could not resolve ucred offset");
         return -1;
     }
 
+    kernel_logf("prepareIOKitAccess: ucred offset = 0x%x", ucredOff);
+
     uint64_t ucred = ds_kread64(self + ucredOff);
     if (!is_kptr(ucred)) {
-        printf("prepareIOKitAccess: invalid ucred pointer\n");
+        kernel_logf("prepareIOKitAccess: invalid ucred pointer");
         return -1;
     }
 
     uint32_t taskOff = find_task_offset(self);
     uint64_t task = ds_kread64(self + taskOff);
     if (!is_kptr(task)) {
-        printf("prepareIOKitAccess: invalid task pointer\n");
+        kernel_logf("prepareIOKitAccess: invalid task pointer");
         return -1;
     }
+
+    kernel_logf("prepareIOKitAccess: task offset = 0x%x", taskOff);
 
     uint32_t oldCsflags = ds_kread32(self + csflagsOff);
     uint32_t newCsflags = oldCsflags |
@@ -304,9 +331,11 @@ static int prepareIOKitAccess(void) {
         CS_INSTALLER;
     ds_kwrite32(self + csflagsOff, newCsflags);
     if (ds_kread32(self + csflagsOff) != newCsflags) {
-        printf("prepareIOKitAccess: csflags verify failed\n");
+        kernel_logf("prepareIOKitAccess: csflags verify failed");
         return -1;
     }
+
+    kernel_logf("prepareIOKitAccess: proc csflags patched");
 
     struct {
         uint32_t offset;
@@ -322,18 +351,23 @@ static int prepareIOKitAccess(void) {
     for (size_t i = 0; i < sizeof(ucredWrites) / sizeof(ucredWrites[0]); i++) {
         ds_kwrite32(ucred + ucredWrites[i].offset, ucredWrites[i].value);
         if (ds_kread32(ucred + ucredWrites[i].offset) != ucredWrites[i].value) {
-            printf("prepareIOKitAccess: %s verify failed\n", ucredWrites[i].name);
+            kernel_logf("prepareIOKitAccess: %s verify failed", ucredWrites[i].name);
             return -1;
         }
     }
+
+    kernel_logf("prepareIOKitAccess: ucred uid/gid fields patched to root");
 
     uint64_t crLabel = ds_kread64(ucred + 0x78);
     if (crLabel) {
         ds_kwrite64(ucred + 0x78, 0);
         if (ds_kread64(ucred + 0x78) != 0) {
-            printf("prepareIOKitAccess: cr_label verify failed\n");
+            kernel_logf("prepareIOKitAccess: cr_label verify failed");
             return -1;
         }
+        kernel_logf("prepareIOKitAccess: sandbox label cleared");
+    } else {
+        kernel_logf("prepareIOKitAccess: sandbox label already null");
     }
 
     uint32_t tfOff = find_task_flags_offset(task);
@@ -342,7 +376,7 @@ static int prepareIOKitAccess(void) {
         uint32_t newTf = tf | 0x400;
         ds_kwrite32(task + tfOff, newTf);
         if (ds_kread32(task + tfOff) != newTf) {
-            printf("prepareIOKitAccess: task flags verify failed\n");
+            kernel_logf("prepareIOKitAccess: task flags verify failed");
             return -1;
         }
 
@@ -354,10 +388,16 @@ static int prepareIOKitAccess(void) {
             CS_GET_TASK_ALLOW;
         ds_kwrite32(task + taskCsOff, newTaskCs);
         if (ds_kread32(task + taskCsOff) != newTaskCs) {
-            printf("prepareIOKitAccess: task csflags verify failed\n");
+            kernel_logf("prepareIOKitAccess: task csflags verify failed");
             return -1;
         }
+
+        kernel_logf("prepareIOKitAccess: task flags/csflags patched");
+    } else {
+        kernel_logf("prepareIOKitAccess: task flags offset not found; continuing");
     }
+
+    kernel_logf("prepareIOKitAccess: patching finished successfully");
 
     return 0;
 }

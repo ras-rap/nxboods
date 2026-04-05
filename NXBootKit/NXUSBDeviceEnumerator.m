@@ -204,6 +204,9 @@ static void bridgeDeviceNotification(void *u, io_service_t service, natural_t me
 
 - (void)handleError:(NSString *)err {
     NXLog(@"ERR: %@", err);
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelLog"
+                                                        object:nil
+                                                      userInfo:@{ @"message": [NSString stringWithFormat:@"USB: %@", err] }];
     [self.delegate usbDeviceEnumerator:self deviceError:err];
 }
 
