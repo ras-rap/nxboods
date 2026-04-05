@@ -31,20 +31,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Extract version info
           version=$(xcodebuild -project NXBoot.xcodeproj -scheme NXBoot -showBuildSettings 2>/dev/null | grep MARKETING_VERSION | head -1 | awk -F' = ' '{print $2}')
           buildno=$(xcodebuild -project NXBoot.xcodeproj -scheme NXBoot -showBuildSettings 2>/dev/null | grep CURRENT_PROJECT_VERSION | head -1 | awk -F' = ' '{print $2}')
           bundleid="com.mologie.NXBoot"
 
           echo "Version: $version Build: $buildno"
 
-          # Build
+          DERIVED_DATA="$PWD/build/DerivedData"
+
           xcodebuild \
             -project NXBoot.xcodeproj \
             -scheme NXBoot \
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
+            -derivedDataPath "$DERIVED_DATA" \
             clean build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -56,27 +57,11 @@ jobs:
             exit 1
           fi
 
-          # Prepare IPA
-          releasedir="build/DerivedData/NXBoot/Build/Products/Release-iphoneos"
-          rm -f "$releasedir/NXBoot.app/embedded.mobileprovision"
+          releasedir="$DERIVED_DATA/Build/Products/Release-iphoneos"
 
-          ldid -I"$bundleid" -Cadhoc -SNXBoot/NXBootJailbreak.entitlements "$releasedir/NXBoot.app/NXBoot"
-
-          rm -rf DerivedData/ipa
-          mkdir -p DerivedData/ipa/Payload
-          ditto "$releasedir/NXBoot.app" DerivedData/ipa/Payload/NXBoot.app
-
-          # Create dist directory
-          mkdir -p dist
-          tipa="dist/NXBoot_${version}-${buildno}.tipa"
-          rm -f "$tipa"
-          (cd DerivedData/ipa && COPYFILE_DISABLE=1 zip -r "../../$tipa" "Payload" -x "._*" -x ".DS_Store" -x "__MACOSX")
-
-          # Export dSYM
-          mkdir -p dist
-          ditto "$releasedir/NXBoot.app.dSYM" "dist/NXBoot_${version}-${buildno}.app.dSYM"
-
-          echo "IPA built: $tipa"
+          # Fail fast with a clear error if paths are wrong
+          test -f "NXBoot/NXBootJailbreak.entitlements"
+          test -f "$releasedir/NXBoot.app/NXBoot"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
