@@ -222,6 +222,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A701175F20EE320F00B3D45B /* WebKit.framework in Frameworks */,
+				NXK000000000000000000000A /* libxpf.dylib in Frameworks */,
+				NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
