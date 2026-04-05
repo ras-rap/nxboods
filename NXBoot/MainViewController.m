@@ -35,6 +35,18 @@
 
 @implementation MainViewController
 
+static void nx_kernel_log_callback(const char *msg) {
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelLog"
+                                                        object:nil
+                                                      userInfo:@{@"message": [NSString stringWithUTF8String:msg]}];
+}
+
+static void nx_kernel_progress_callback(double progress) {
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelProgress"
+                                                        object:nil
+                                                      userInfo:@{@"progress": @(progress)}];
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
 
@@ -74,16 +86,8 @@
         self.kernelStatusText = @"Ready to exploit";
     }
 
-    NXKernelSetLogCallback([](const char *msg) {
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelLog"
-                                                            object:nil
-                                                          userInfo:@{@"message": [NSString stringWithUTF8String:msg]}];
-    });
-    NXKernelSetProgressCallback([](double progress) {
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelProgress"
-                                                            object:nil
-                                                          userInfo:@{@"progress": @(progress)}];
-    });
+    NXKernelSetLogCallback(nx_kernel_log_callback);
+    NXKernelSetProgressCallback(nx_kernel_progress_callback);
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(handleKernelLog:)
