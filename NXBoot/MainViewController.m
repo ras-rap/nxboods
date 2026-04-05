@@ -332,7 +332,7 @@
 
 #pragma mark - Switch Tab
 
-@interface SwitchViewController : UITableViewController
+@interface SwitchViewController : UITableViewController <NXUSBDeviceEnumeratorDelegate, UIDocumentPickerDelegate>
 @property (nonatomic, strong) UIColor *textColorButton;
 @property (nonatomic, strong) UIColor *textColorInactive;
 @property (nonatomic, strong) NSDateFormatter *payloadDateFormatter;
@@ -352,7 +352,7 @@
     [super viewDidLoad];
     self.title = @"Switch";
     if (@available(iOS 13, *)) {
-        self.tabBarItem.image = [UIImage systemImageNamed:"gamecontroller.fill"];
+        self.tabBarItem.image = [UIImage systemImageNamed:@"gamecontroller.fill"];
     }
 
     self.textColorButton = [UIColor colorWithRed:0.001 green:0.732 blue:0.883 alpha:1.0];
@@ -550,9 +550,6 @@
     }
 }
 
-@end
-
-@implementation SwitchViewController (UIDocumentPickerDelegate)
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url {
     NSError *error = nil;
     Payload *payload = [self.payloadStorage importPayload:url.path move:YES error:&error];
@@ -566,9 +563,7 @@
         [self presentViewController:alert animated:YES completion:nil];
     }
 }
-@end
 
-@implementation SwitchViewController (NXUSBDeviceEnumeratorDelegate)
 - (void)usbDeviceEnumerator:(NXUSBDeviceEnumerator *)deviceEnum deviceConnected:(NXUSBDevice *)device {
     self.usbDevice = device;
     if (self.selectedPayload) {
@@ -586,6 +581,7 @@
     self.usbError = err;
     [self updateDeviceStatus:@"USB device error"];
 }
+
 @end
 
 #pragma mark - Main TabBarController
