@@ -338,7 +338,7 @@ static int prepareIOKitAccess(void) {
 
     kernel_logf("prepareIOKitAccess: csflags offset = 0x%x", csflagsOff);
 
-    uint32_t ucredOff = (uint32_t)getucredoffset();
+    uint32_t ucredOff = (uint32_t)getucredooffset();
     if (!ucredOff) {
         ucredOff = find_ucred_offset(self);
     }
