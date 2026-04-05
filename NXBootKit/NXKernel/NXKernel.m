@@ -108,6 +108,10 @@ uint64_t NXKernelProcByName(const char *name) {
     return procbyname(name);
 }
 
+int NXKernelPatchCSFlags(void) {
+    return patchcsflags();
+}
+
 bool NXKernelIsSupported(void) {
     // Implemented in NXKernelSupport.m
     extern bool nx_kernel_is_supported(void);

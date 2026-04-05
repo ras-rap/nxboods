@@ -161,6 +161,16 @@
                 self.exploitReady = YES;
                 self.kernelBaseText = [NSString stringWithFormat:@"0x%llx", NXKernelGetBase()];
                 self.kernelSlideText = [NSString stringWithFormat:@"0x%llx", NXKernelGetSlide()];
+
+                // Patch csflags to CS_PLATFORM_BINARY so IOKit grants USB access
+                // without requiring private entitlements in the provisioning profile
+                int p = NXKernelPatchCSFlags();
+                if (p == 0) {
+                    NSLog(@"[kernel] csflags patched — IOKit USB access granted");
+                } else {
+                    NSLog(@"[kernel] csflags patch failed (%d) — USB may not work", p);
+                }
+
                 [self.usbEnum start];
             } else {
                 self.exploitFailed = YES;
