@@ -343,6 +343,57 @@ int killproc(const char* name) {
 
 static const uint32_t UCRED_CR_UID_OFFSET = 0x18;
 
+static bool is_valid_csflags(uint32_t v) {
+    static const uint32_t known[] = {
+        0x00000000, 0x00000001, 0x00000002, 0x00000004, 0x00000008,
+        0x00000010, 0x00000020, 0x00000040, 0x00000080, 0x00000100,
+        0x00000200, 0x00000400, 0x00000800, 0x00001000, 0x00002000,
+        0x00004000, 0x00008000, 0x00010000, 0x00020000, 0x00040000,
+        0x00080000, 0x00100000, 0x00200000, 0x00400000, 0x00800000,
+        0x00000104, 0x00000108, 0x0000010c, 0x00000144, 0x00000148,
+        0x0000014c, 0x00000204, 0x00000208, 0x0000020c,
+    };
+    for (size_t i = 0; i < sizeof(known)/sizeof(known[0]); i++) {
+        if (v == known[i]) return true;
+    }
+    return false;
+}
+
+static uint32_t find_csflags_offset(uint64_t proc) {
+    uint64_t procsize = PROC_STRUCT_SIZE;
+    for (uint32_t off = 0x100; off < procsize - 4; off += 4) {
+        uint32_t v = ds_kread32(proc + off);
+        if (is_valid_csflags(v)) {
+            uint32_t test = v | CS_DEBUGGED;
+            ds_kwrite32(proc + off, test);
+            uint32_t verify = ds_kread32(proc + off);
+            ds_kwrite32(proc + off, v);
+            if (verify == test) {
+                printf("found csflags at offset 0x%x (value=0x%x)\n", off, v);
+                return off;
+            }
+        }
+    }
+    printf("csflags offset not found\n");
+    return 0;
+}
+
+static uint64_t find_ucred_offset(uint64_t proc) {
+    uint64_t procsize = PROC_STRUCT_SIZE;
+    for (uint32_t off = 0x80; off < procsize - 8; off += 8) {
+        uint64_t v = ds_kread64(proc + off);
+        if (v > 0xffffff8000000000ULL) {
+            uint64_t uid_val = ds_kread32(v + UCRED_CR_UID_OFFSET);
+            if (uid_val == getuid()) {
+                printf("found ucred at offset 0x%x (ptr=0x%llx)\n", off, v);
+                return off;
+            }
+        }
+    }
+    printf("ucred offset not found\n");
+    return 0;
+}
+
 int patchcsflags(void) {
     uint64_t self = ourproc();
     if (!self) {
@@ -350,14 +401,13 @@ int patchcsflags(void) {
         return -1;
     }
 
-    uint64_t csflags_off = getcsflagsoffset();
-    uint64_t ucred_off   = getucredooffset();
-
+    uint32_t csflags_off = find_csflags_offset(self);
     if (!csflags_off) {
-        printf("patchcsflags: csflags offset not resolved — cannot patch\n");
+        printf("patchcsflags: could not find csflags offset\n");
         return -1;
     }
 
+    uint64_t ucred_off = find_ucred_offset(self);
     if (ucred_off) {
         uint64_t ucred = ds_kread64(self + ucred_off);
         if (ucred) {
