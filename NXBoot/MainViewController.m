@@ -24,9 +24,15 @@
 @property (nonatomic, strong, nullable) NSString *usbStatus;
 @property (nonatomic, strong, nullable) NSString *usbError;
 
-@property (nonatomic, assign) NXKernelStatus kernelStatus;
-@property (nonatomic, strong, nullable) NSString *kernelStatusText;
-@property (nonatomic, assign) BOOL kernelRunning;
+// Kernel exploit state
+@property (nonatomic, assign) BOOL hasOffsets;
+@property (nonatomic, assign) BOOL downloadingOffsets;
+@property (nonatomic, assign) BOOL exploitRunning;
+@property (nonatomic, assign) BOOL exploitReady;
+@property (nonatomic, assign) BOOL exploitFailed;
+@property (nonatomic, assign) double exploitProgress;
+@property (nonatomic, strong, nullable) NSString *kernelBaseText;
+@property (nonatomic, strong, nullable) NSString *kernelSlideText;
 
 @end
 
@@ -35,15 +41,17 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    self.kernelStatus = NXKernelStatusNotStarted;
-    self.kernelStatusText = @"Not started";
-    self.kernelRunning = NO;
+    self.hasOffsets = NXKernelHasOffsets();
+    self.downloadingOffsets = NO;
+    self.exploitRunning = NO;
+    self.exploitReady = NO;
+    self.exploitFailed = NO;
+    self.exploitProgress = 0.0;
+    self.kernelBaseText = nil;
+    self.kernelSlideText = nil;
 
     if (!NXKernelIsSupported()) {
-        self.kernelStatus = NXKernelStatusFailed;
-        self.kernelStatusText = @"Device not supported";
-    } else if (NXKernelHasOffsets()) {
-        self.kernelStatusText = @"Ready to exploit";
+        self.exploitFailed = YES;
     }
 
     [[NSNotificationCenter defaultCenter] addObserver:self
@@ -84,7 +92,7 @@
     if (!Settings.rememberPayload) {
         return;
     }
-    
+
     NSString *payloadFileName = Settings.lastPayloadFileName;
     if (!payloadFileName) {
         return;
@@ -101,7 +109,6 @@
         }
     }
 
-    // if we got here, then the referenced payload no longer exists
     Settings.lastPayloadFileName = nil;
 }
 
@@ -110,49 +117,65 @@
     [self.usbEnum stop];
 }
 
-- (void)runKernelExploit {
-    self.kernelRunning = YES;
-    self.kernelStatus = NXKernelStatusRunning;
-    self.kernelStatusText = @"Running exploit...";
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
-                  withRowAnimation:UITableViewRowAnimationNone];
+#pragma mark - Kernel Exploit
+
+- (void)downloadOffsets {
+    if (self.downloadingOffsets || self.exploitRunning) return;
+
+    self.downloadingOffsets = YES;
+    [self reloadKernelSection];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        if (!NXKernelHasOffsets()) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                self.kernelStatusText = @"Downloading kernelcache...";
-                [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
-                              withRowAnimation:UITableViewRowAnimationNone];
-            });
-            if (!NXKernelDownloadOffsets()) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.kernelRunning = NO;
-                    self.kernelStatus = NXKernelStatusFailed;
-                    self.kernelStatusText = @"Failed to download kernelcache";
-                    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
-                                  withRowAnimation:UITableViewRowAnimationNone];
-                });
-                return;
+        BOOL ok = NXKernelDownloadOffsets();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.downloadingOffsets = NO;
+            self.hasOffsets = ok;
+            [self reloadKernelSection];
+            if (!ok) {
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Download Failed"
+                                                                             message:@"Could not download kernelcache. Check your internet connection and try again."
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:alert animated:YES completion:nil];
             }
-        }
+        });
+    });
+}
 
+- (void)runExploit {
+    if (self.exploitRunning || !self.hasOffsets) return;
+
+    self.exploitRunning = YES;
+    self.exploitProgress = 0.0;
+    self.exploitFailed = NO;
+    [self reloadKernelSection];
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NXKernelInitOffsets();
         NXKernelStatus status = NXKernelRun();
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.kernelRunning = NO;
-            self.kernelStatus = status;
+            self.exploitRunning = NO;
+            self.exploitProgress = 1.0;
             if (status == NXKernelStatusReady) {
-                self.kernelStatusText = @"Ready";
+                self.exploitReady = YES;
+                self.kernelBaseText = [NSString stringWithFormat:@"0x%llx", NXKernelGetBase()];
+                self.kernelSlideText = [NSString stringWithFormat:@"0x%llx", NXKernelGetSlide()];
                 [self.usbEnum start];
             } else {
-                self.kernelStatusText = @"Exploit failed";
+                self.exploitFailed = YES;
             }
-            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
-                          withRowAnimation:UITableViewRowAnimationNone];
+            [self reloadKernelSection];
         });
     });
 }
+
+- (void)reloadKernelSection {
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
+                  withRowAnimation:UITableViewRowAnimationNone];
+}
+
+#pragma mark - Switch Boot
 
 - (void)bootPayload:(Payload *)payload {
     NSData *relocator = [PayloadStorage relocator];
@@ -169,7 +192,7 @@
     NSString *error = nil;
     if (NXExec(self.usbDevice, relocator, payloadData, &error)) {
         self.usbError = nil;
-        [self updateDeviceStatus:@"Payload injected 🎉"];
+        [self updateDeviceStatus:@"Payload injected"];
     } else {
         self.usbError = error;
         [self updateDeviceStatus:@"Payload injection error"];
@@ -226,17 +249,13 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
     NSIndexPath *newPayloadPath = [NSIndexPath indexPathForRow:self.payloads.count inSection:TableSectionPayloads];
     if (self.payloads.count != 0) {
-        // will always show "add payload" row when there is no payload
         if (editing && !wasEditing) {
-            // add new payload row
             [self.tableView insertRowsAtIndexPaths:@[newPayloadPath] withRowAnimation:animation];
         } else if (!editing && wasEditing) {
-            // remove new payload row
             [self.tableView deleteRowsAtIndexPaths:@[newPayloadPath] withRowAnimation:animation];
         }
     }
 
-    // update payload section footer for rename hint
     [self.tableView footerViewForSection:TableSectionPayloads].textLabel.text = [self tableView:self.tableView titleForFooterInSection:TableSectionPayloads];
 
     [self.tableView endUpdates];
@@ -252,7 +271,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     switch (section) {
-        case TableSectionKernel: return 1;
+        case TableSectionKernel: return 3;
         case TableSectionLinks: return 2;
         case TableSectionDevice: return 1;
         case TableSectionPayloads: {
@@ -270,8 +289,8 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     switch (section) {
-        case TableSectionKernel: return @"Kernel Exploit";
-        case TableSectionDevice: return @"Device";
+        case TableSectionKernel: return @"Darksword Exploit";
+        case TableSectionDevice: return @"Nintendo Switch";
         case TableSectionPayloads: return @"Payloads";
     }
     return [super tableView:tableView titleForHeaderInSection:section];
@@ -279,6 +298,16 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     switch (section) {
+        case TableSectionKernel: {
+            if (self.exploitReady) {
+                NSMutableString *s = [NSMutableString stringWithFormat:@"Kernel base: %@  Slide: %@", self.kernelBaseText, self.kernelSlideText];
+                if (self.kernelBaseText) {
+                    [s appendFormat:@"\nKernel base: %@  Slide: %@", self.kernelBaseText, self.kernelSlideText];
+                }
+                return s;
+            }
+            return @"Step 1: Download kernelcache offsets (one-time). Step 2: Run the exploit to gain kernel read/write. The Switch section below will unlock after a successful exploit.";
+        }
         case TableSectionDevice:
             return [self footerForDeviceCell];
         case TableSectionPayloads:
@@ -294,19 +323,86 @@ typedef NS_ENUM(NSInteger, TableSection) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     switch (indexPath.section) {
         case TableSectionKernel: {
-            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
-            cell.textLabel.text = self.kernelRunning ? @"Running exploit..." : self.kernelStatusText;
-            if (self.kernelStatus == NXKernelStatusReady) {
-                cell.textLabel.textColor = [UIColor systemGreenColor];
-            } else if (self.kernelStatus == NXKernelStatusFailed) {
-                cell.textLabel.textColor = [UIColor systemRedColor];
-            } else if (self.kernelRunning) {
-                cell.textLabel.textColor = [UIColor systemOrangeColor];
-            } else {
-                cell.textLabel.textColor = self.textColorButton;
+            switch (indexPath.row) {
+                case 0: {
+                    // Step 1: Download offsets
+                    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
+                    if (self.hasOffsets) {
+                        cell.textLabel.text = @"Offsets cached";
+                        cell.textLabel.textColor = [UIColor systemGreenColor];
+                        cell.accessoryType = UITableViewCellAccessoryCheckmark;
+                        cell.userInteractionEnabled = NO;
+                    } else if (self.downloadingOffsets) {
+                        cell.textLabel.text = @"Downloading kernelcache...";
+                        cell.textLabel.textColor = [UIColor systemOrangeColor];
+                        cell.accessoryType = UITableViewCellAccessoryNone;
+                        cell.userInteractionEnabled = NO;
+                    } else if (self.exploitFailed) {
+                        cell.textLabel.text = @"Download offsets";
+                        cell.textLabel.textColor = self.textColorButton;
+                        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                        cell.userInteractionEnabled = YES;
+                    } else {
+                        cell.textLabel.text = @"Download Kernelcache Offsets";
+                        cell.textLabel.textColor = self.textColorButton;
+                        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                        cell.userInteractionEnabled = YES;
+                    }
+                    return cell;
+                }
+                case 1: {
+                    // Step 2: Run exploit
+                    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
+                    if (self.exploitRunning) {
+                        cell.textLabel.text = [NSString stringWithFormat:@"Running exploit... %d%%", (int)(self.exploitProgress * 100)];
+                        cell.textLabel.textColor = [UIColor systemOrangeColor];
+                        cell.accessoryType = UITableViewCellAccessoryNone;
+                        cell.userInteractionEnabled = NO;
+                    } else if (self.exploitReady) {
+                        cell.textLabel.text = @"Exploit succeeded";
+                        cell.textLabel.textColor = [UIColor systemGreenColor];
+                        cell.accessoryType = UITableViewCellAccessoryCheckmark;
+                        cell.userInteractionEnabled = NO;
+                    } else if (self.exploitFailed) {
+                        cell.textLabel.text = @"Exploit failed — tap to retry";
+                        cell.textLabel.textColor = [UIColor systemRedColor];
+                        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                        cell.userInteractionEnabled = YES;
+                    } else if (!self.hasOffsets) {
+                        cell.textLabel.text = @"Run Exploit";
+                        cell.textLabel.textColor = self.textColorInactive;
+                        cell.accessoryType = UITableViewCellAccessoryNone;
+                        cell.userInteractionEnabled = NO;
+                    } else {
+                        cell.textLabel.text = @"Run Exploit";
+                        cell.textLabel.textColor = self.textColorButton;
+                        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                        cell.userInteractionEnabled = YES;
+                    }
+                    return cell;
+                }
+                case 2: {
+                    // Progress bar
+                    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ProgressCell"];
+                    if (!cell) {
+                        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"ProgressCell"];
+                        UIProgressView *pv = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
+                        pv.tag = 999;
+                        pv.translatesAutoresizingMaskIntoConstraints = NO;
+                        [cell.contentView addSubview:pv];
+                        [NSLayoutConstraint activateConstraints:@[
+                            [pv.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:15],
+                            [pv.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
+                            [pv.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+                        ]];
+                    }
+                    UIProgressView *pv = (UIProgressView *)[cell viewWithTag:999];
+                    pv.progress = (float)self.exploitProgress;
+                    pv.hidden = !self.exploitRunning;
+                    return cell;
+                }
             }
-            cell.accessoryType = self.kernelRunning ? UITableViewCellAccessoryNone : UITableViewCellAccessoryDisclosureIndicator;
-            return cell;
+            break;
         }
         case TableSectionLinks: {
             UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
@@ -324,6 +420,13 @@ typedef NS_ENUM(NSInteger, TableSection) {
         case TableSectionDevice: {
             UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"DeviceCell" forIndexPath:indexPath];
             [self configureDeviceCell:cell];
+            // Grey out until exploit is ready
+            cell.textLabel.enabled = self.exploitReady;
+            cell.detailTextLabel.enabled = self.exploitReady;
+            if (!self.exploitReady) {
+                cell.textLabel.text = @"Nintendo Switch";
+                cell.detailTextLabel.text = @"Exploit kernel first to enable Switch support";
+            }
             return cell;
         }
         case TableSectionPayloads: {
@@ -331,6 +434,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
                 UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
                 cell.accessoryType = UITableViewCellAccessoryNone;
                 cell.textLabel.text = @"Add Payload";
+                cell.textLabel.enabled = self.exploitReady;
                 return cell;
             } else {
                 UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"PayloadCell" forIndexPath:indexPath];
@@ -340,6 +444,8 @@ typedef NS_ENUM(NSInteger, TableSection) {
                 cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ (%llu KiB)",
                                              [self.payloadDateFormatter stringFromDate:payload.fileDate],
                                              payload.fileSize / 1024];
+                cell.textLabel.enabled = self.exploitReady;
+                cell.detailTextLabel.enabled = self.exploitReady;
                 return cell;
             }
         }
@@ -366,7 +472,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
     if (self.usbError) {
         return self.usbError;
     } else {
-        return @"Connect your Nintendo Switch in RCM mode via a Lighting OTG adapter. An unsupported \"APX\" device warning from iOS can safely be ignored.";
+        return @"Connect your Nintendo Switch in RCM mode via a Lightning OTG adapter. An unsupported \"APX\" device warning from iOS can safely be ignored.";
     }
 }
 
@@ -406,7 +512,6 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (UITableViewCellEditingStyle)tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (!self.editing) {
-        // Disable swipe-to-delete, assuming the user seldomly wants to delete payloads.
         return UITableViewCellEditingStyleNone;
     }
     if (indexPath.section != TableSectionPayloads) {
@@ -443,9 +548,11 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (NSIndexPath *)tableView:(UITableView *)tableView willSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     if (self.isEditing && indexPath.section != TableSectionPayloads) {
-        return nil; // nothing except payloads can be tapped in edit mode
+        return nil;
     } else if (indexPath.section == TableSectionDevice) {
-        return nil; // device can never be tapped
+        return nil;
+    } else if (indexPath.section == TableSectionPayloads && !self.exploitReady) {
+        return nil;
     } else {
         return indexPath;
     }
@@ -455,8 +562,10 @@ typedef NS_ENUM(NSInteger, TableSection) {
     [self.tableView deselectRowAtIndexPath:indexPath animated:YES];
     switch (indexPath.section) {
         case TableSectionKernel:
-            if (!self.kernelRunning && self.kernelStatus != NXKernelStatusReady) {
-                [self runKernelExploit];
+            if (indexPath.row == 0 && !self.hasOffsets && !self.downloadingOffsets) {
+                [self downloadOffsets];
+            } else if (indexPath.row == 1 && self.hasOffsets && !self.exploitRunning && !self.exploitReady) {
+                [self runExploit];
             }
             break;
         case TableSectionLinks:
@@ -564,7 +673,6 @@ typedef NS_ENUM(NSInteger, TableSection) {
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url {
-    // we are provided a local copy due to LSSupportsOpeningDocumentsInPlace=NO in Info.plist (default)
     NSError *error = nil;
     Payload *payload = [self.payloadStorage importPayload:url.path move:YES error:&error];
     if (payload) {
@@ -572,10 +680,8 @@ typedef NS_ENUM(NSInteger, TableSection) {
         [self.payloads addObject:payload];
         [self.payloadStorage storePayloadSortOrder:self.payloads];
         if (self.payloads.count == 1 && !self.editing) {
-            // remove add payload cell
             NSIndexPath *addButtonPath = [NSIndexPath indexPathForRow:0 inSection:TableSectionPayloads];
             [self.tableView deleteRowsAtIndexPaths:@[addButtonPath] withRowAnimation:UITableViewRowAnimationAutomatic];
-            // simultaneously insert the first entry below it
             NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:TableSectionPayloads];
             [self.tableView insertRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
         } else {
@@ -632,11 +738,13 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (void)usbDeviceEnumerator:(NXUSBDeviceEnumerator *)deviceEnum deviceConnected:(NXUSBDevice *)device {
     self.usbDevice = device;
-    if (self.selectedPayload) {
-        [self updateDeviceStatus:@"Connected, booting payload..."];
-        [self bootPayload:self.selectedPayload];
-    } else {
-        [self updateDeviceStatus:@"No payload activated yet"];
+    if (self.exploitReady) {
+        if (self.selectedPayload) {
+            [self updateDeviceStatus:@"Connected, booting payload..."];
+            [self bootPayload:self.selectedPayload];
+        } else {
+            [self updateDeviceStatus:@"No payload activated yet"];
+        }
     }
 }
 
