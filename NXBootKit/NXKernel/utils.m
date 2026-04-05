@@ -15,9 +15,14 @@
 #include <stdarg.h>
 #import <sys/types.h>
 #include <sys/sysctl.h>
-#include <sys/codesign.h>
 #include <stdint.h>
 #include <stdbool.h>
+
+#ifndef CS_OPS_STATUS
+#define CS_OPS_STATUS 0
+#endif
+
+extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 
 #define P_DISABLE_ASLR 0x00001000
 
