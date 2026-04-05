@@ -886,7 +886,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SYSTEM_FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/System/Frameworks-$(PLATFORM_NAME)";
 				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/System/include";
-				FRAMEWORK_SEARCH_PATHS = (
+				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/NXBootKit/NXKernel/lib",
 				);
@@ -953,7 +953,7 @@
 				SYSTEM_FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/System/Frameworks-$(PLATFORM_NAME)";
 				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/System/include";
 				VALIDATE_PRODUCT = YES;
-				FRAMEWORK_SEARCH_PATHS = (
+				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/NXBootKit/NXKernel/lib",
 				);
