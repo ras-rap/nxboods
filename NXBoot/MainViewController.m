@@ -96,7 +96,7 @@ static void NXBootKernelLogCallback(const char *message) {
     self.usbEnum.delegate = self;
     [self.usbEnum setFilterForVendorID:kTegraX1VendorID productID:kTegraX1ProductID];
 
-    self.navigationItem.leftBarButtonItem = self.settingsButtonItem;
+    self.navigationItem.leftBarButtonItems = @[self.settingsButtonItem, self.exportLogsButtonItem];
     self.navigationItem.rightBarButtonItem = self.editButtonItem;
 }
 
@@ -651,6 +651,65 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (void)settingsButtonTapped:(id)sender {
     [self performSegueWithIdentifier:@"Settings" sender:self];
+}
+
+- (UIBarButtonItem *)exportLogsButtonItem {
+    if (@available(iOS 13, *)) {
+        return [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.and.arrow.up"]
+                                                style:UIBarButtonItemStylePlain
+                                               target:self
+                                               action:@selector(exportLogsButtonTapped:)];
+    } else {
+        return [[UIBarButtonItem alloc] initWithTitle:@"Share Logs"
+                                                style:UIBarButtonItemStylePlain
+                                               target:self
+                                               action:@selector(exportLogsButtonTapped:)];
+    }
+}
+
+- (void)exportLogsButtonTapped:(id)sender {
+    [self exportLogs];
+}
+
+- (void)exportLogs {
+    if (self.logs.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Logs"
+                                                                         message:@"There are no log entries to export yet."
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    NSMutableString *body = [NSMutableString string];
+    [body appendString:@"NXBoot Log Export\n"];
+    [body appendFormat:@"Date: %@\n", [NSDate date]];
+    [body appendFormat:@"Entries: %lu\n\n", (unsigned long)self.logs.count];
+    [body appendString:[self.logs componentsJoinedByString:@"\n"]];
+    [body appendString:@"\n"];
+
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"yyyyMMdd-HHmmss";
+    NSString *fileName = [NSString stringWithFormat:@"nxboot-log-%@.txt", [formatter stringFromDate:[NSDate date]]];
+    NSURL *fileURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:fileName]];
+
+    NSError *writeError = nil;
+    BOOL wrote = [body writeToURL:fileURL atomically:YES encoding:NSUTF8StringEncoding error:&writeError];
+    if (!wrote || writeError) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Failed"
+                                                                         message:writeError.localizedDescription ?: @"Could not write log file."
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL]
+                                                                          applicationActivities:nil];
+    if (share.popoverPresentationController) {
+        share.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItems.lastObject;
+    }
+    [self presentViewController:share animated:YES completion:nil];
 }
 
 - (IBAction)settingsUnwindAction:(UIStoryboardSegue *)unwindSegue {
