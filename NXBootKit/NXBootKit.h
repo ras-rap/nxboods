@@ -3,6 +3,7 @@
 #import <NXBootKit/NXLog.h>
 #import <NXBootKit/NXUSBDevice.h>
 #import <NXBootKit/NXUSBDeviceEnumerator.h>
+#import <NXBootKit/NXKernel.h>
 
 #import <Foundation/Foundation.h>
 

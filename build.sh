@@ -49,13 +49,17 @@ CoreDataGenerated=DerivedData/NXBoot/Build/Intermediates.noindex/NXBoot.build/Re
   -isystem System/include \
   -I. \
   -INXBootKit \
-  -I$CoreDataGenerated \
-  -D__OPEN_SOURCE__=1 \
+  -INXBootKit/NXKernel \
+  -INXBootKit/NXKernel/headers \
+  -INXBootKit/NXKernel/choma \
   -F$releasedir \
+  -F NXBootKit/NXKernel/lib \
   -framework AppCenter \
   -framework AppCenterAnalytics \
   -framework AppCenterCrashes \
   -framework WebKit \
+  -framework xpf \
+  -framework grabkernel2 \
   -O2 \
   -Wall \
   -fmodules -fstrict-aliasing -fvisibility=hidden \
@@ -66,7 +70,7 @@ CoreDataGenerated=DerivedData/NXBoot/Build/Intermediates.noindex/NXBoot.build/Re
   -Xlinker -no_deduplicate \
   -Xlinker -no_adhoc_codesign \
   -o "$releasedir/NXBoot.armv7" \
-  NXBoot/*.m NXBootKit/*.m $CoreDataGenerated/*.m
+  NXBoot/*.m NXBootKit/*.m NXBootKit/NXKernel/*.m $CoreDataGenerated/*.m
 ldid -I$bundleid -Cadhoc -SNXBoot/NXBootJailbreak.entitlements "$releasedir/NXBoot.armv7"
 
 echo "Making iOS application universal..."

@@ -7,6 +7,40 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		NXK0000000000000000000001 /* NXKernel.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000001 /* NXKernel.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		NXK0000000000000000000002 /* NXKernel.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000002 /* NXKernel.m */; };
+		NXK0000000000000000000003 /* NXKernelSupport.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000003 /* NXKernelSupport.m */; };
+		NXK0000000000000000000004 /* darksword.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000004 /* darksword.h */; };
+		NXK0000000000000000000005 /* darksword.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000005 /* darksword.m */; };
+		NXK0000000000000000000006 /* utils.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000006 /* utils.h */; };
+		NXK0000000000000000000007 /* utils.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000007 /* utils.m */; };
+		NXK0000000000000000000008 /* offsets.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000008 /* offsets.h */; };
+		NXK0000000000000000000009 /* offsets.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000009 /* offsets.m */; };
+		NXK000000000000000000000A /* libxpf.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000A /* libxpf.dylib */; };
+		NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000B /* libgrabkernel2.dylib */; };
+		NXK000000000000000000000C /* xpf.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000C /* xpf.h */; };
+		NXK000000000000000000000D /* libgrabkernel2.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000D /* libgrabkernel2.h */; };
+		NXK000000000000000000000E /* arm64.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000E /* arm64.h */; };
+		NXK000000000000000000000F /* Base64.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000F /* Base64.h */; };
+		NXK0000000000000000000010 /* BufferedStream.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000010 /* BufferedStream.h */; };
+		NXK0000000000000000000011 /* CachePatching.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000011 /* CachePatching.h */; };
+		NXK0000000000000000000012 /* CodeDirectory.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000012 /* CodeDirectory.h */; };
+		NXK0000000000000000000013 /* CSBlob.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000013 /* CSBlob.h */; };
+		NXK0000000000000000000014 /* DER.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000014 /* DER.h */; };
+		NXK0000000000000000000015 /* dyld_cache_format.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000015 /* dyld_cache_format.h */; };
+		NXK0000000000000000000016 /* DyldSharedCache.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000016 /* DyldSharedCache.h */; };
+		NXK0000000000000000000017 /* Entitlements.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000017 /* Entitlements.h */; };
+		NXK0000000000000000000018 /* Fat.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000018 /* Fat.h */; };
+		NXK0000000000000000000019 /* FileStream.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000019 /* FileStream.h */; };
+		NXK000000000000000000001A /* fixup-chains.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000001A /* fixup-chains.h */; };
+		NXK000000000000000000001B /* Host.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000001B /* Host.h */; };
+		NXK000000000000000000001C /* MachO.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000001C /* MachO.h */; };
+		NXK000000000000000000001D /* MachOByteOrder.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000001D /* MachOByteOrder.h */; };
+		NXK000000000000000000001E /* MachOLoadCommand.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000001E /* MachOLoadCommand.h */; };
+		NXK000000000000000000001F /* MemoryStream.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000001F /* MemoryStream.h */; };
+		NXK0000000000000000000020 /* PatchFinder_arm64.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000020 /* PatchFinder_arm64.h */; };
+		NXK0000000000000000000021 /* PatchFinder.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000021 /* PatchFinder.h */; };
+		NXK0000000000000000000022 /* Util.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK1000000000000000000022 /* Util.h */; };
 		1104E3272B4AE3DC00DF24B5 /* NXVisibility.h in Headers */ = {isa = PBXBuildFile; fileRef = 1104E3262B4AE3DC00DF24B5 /* NXVisibility.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		1108AB1A2B4E158100DF24B5 /* AppCenterCrashes.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1108AB142B4E158100DF24B5 /* AppCenterCrashes.xcframework */; };
 		1108AB1B2B4E158100DF24B5 /* AppCenterAnalytics.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1108AB152B4E158100DF24B5 /* AppCenterAnalytics.xcframework */; };
@@ -78,6 +112,8 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				NXK000000000000000000000A /* libxpf.dylib in Frameworks */,
+				NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -85,6 +121,40 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		NXK1000000000000000000001 /* NXKernel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NXKernel.h; sourceTree = "<group>"; };
+		NXK1000000000000000000002 /* NXKernel.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NXKernel.m; sourceTree = "<group>"; };
+		NXK1000000000000000000003 /* NXKernelSupport.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NXKernelSupport.m; sourceTree = "<group>"; };
+		NXK1000000000000000000004 /* darksword.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = darksword.h; sourceTree = "<group>"; };
+		NXK1000000000000000000005 /* darksword.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = darksword.m; sourceTree = "<group>"; };
+		NXK1000000000000000000006 /* utils.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = utils.h; sourceTree = "<group>"; };
+		NXK1000000000000000000007 /* utils.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = utils.m; sourceTree = "<group>"; };
+		NXK1000000000000000000008 /* offsets.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = offsets.h; sourceTree = "<group>"; };
+		NXK1000000000000000000009 /* offsets.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = offsets.m; sourceTree = "<group>"; };
+		NXK100000000000000000000A /* libxpf.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libxpf.dylib; sourceTree = "<group>"; };
+		NXK100000000000000000000B /* libgrabkernel2.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libgrabkernel2.dylib; sourceTree = "<group>"; };
+		NXK100000000000000000000C /* xpf.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = xpf.h; sourceTree = "<group>"; };
+		NXK100000000000000000000D /* libgrabkernel2.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = libgrabkernel2.h; sourceTree = "<group>"; };
+		NXK100000000000000000000E /* arm64.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = arm64.h; sourceTree = "<group>"; };
+		NXK100000000000000000000F /* Base64.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Base64.h; sourceTree = "<group>"; };
+		NXK1000000000000000000010 /* BufferedStream.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BufferedStream.h; sourceTree = "<group>"; };
+		NXK1000000000000000000011 /* CachePatching.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CachePatching.h; sourceTree = "<group>"; };
+		NXK1000000000000000000012 /* CodeDirectory.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CodeDirectory.h; sourceTree = "<group>"; };
+		NXK1000000000000000000013 /* CSBlob.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CSBlob.h; sourceTree = "<group>"; };
+		NXK1000000000000000000014 /* DER.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DER.h; sourceTree = "<group>"; };
+		NXK1000000000000000000015 /* dyld_cache_format.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = dyld_cache_format.h; sourceTree = "<group>"; };
+		NXK1000000000000000000016 /* DyldSharedCache.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DyldSharedCache.h; sourceTree = "<group>"; };
+		NXK1000000000000000000017 /* Entitlements.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Entitlements.h; sourceTree = "<group>"; };
+		NXK1000000000000000000018 /* Fat.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Fat.h; sourceTree = "<group>"; };
+		NXK1000000000000000000019 /* FileStream.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FileStream.h; sourceTree = "<group>"; };
+		NXK100000000000000000001A /* fixup-chains.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "fixup-chains.h"; sourceTree = "<group>"; };
+		NXK100000000000000000001B /* Host.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Host.h; sourceTree = "<group>"; };
+		NXK100000000000000000001C /* MachO.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MachO.h; sourceTree = "<group>"; };
+		NXK100000000000000000001D /* MachOByteOrder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MachOByteOrder.h; sourceTree = "<group>"; };
+		NXK100000000000000000001E /* MachOLoadCommand.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MachOLoadCommand.h; sourceTree = "<group>"; };
+		NXK100000000000000000001F /* MemoryStream.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MemoryStream.h; sourceTree = "<group>"; };
+		NXK1000000000000000000020 /* PatchFinder_arm64.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PatchFinder_arm64.h; sourceTree = "<group>"; };
+		NXK1000000000000000000021 /* PatchFinder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PatchFinder.h; sourceTree = "<group>"; };
+		NXK1000000000000000000022 /* Util.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Util.h; sourceTree = "<group>"; };
 		1104E3262B4AE3DC00DF24B5 /* NXVisibility.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NXVisibility.h; sourceTree = "<group>"; };
 		1108AB142B4E158100DF24B5 /* AppCenterCrashes.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = AppCenterCrashes.xcframework; sourceTree = "<group>"; };
 		1108AB152B4E158100DF24B5 /* AppCenterAnalytics.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = AppCenterAnalytics.xcframework; sourceTree = "<group>"; };
@@ -140,6 +210,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				NXK000000000000000000000A /* libxpf.dylib in Frameworks */,
+				NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -207,8 +279,74 @@
 				A73FDCF320FA9C72007EBF4F /* NXUSBDeviceEnumerator.h */,
 				A73FDCEE20FA9C71007EBF4F /* NXUSBDeviceEnumerator.m */,
 				1104E3262B4AE3DC00DF24B5 /* NXVisibility.h */,
+				NXK2000000000000000000001 /* NXKernel */,
 			);
 			path = NXBootKit;
+			sourceTree = "<group>";
+		};
+		NXK2000000000000000000001 /* NXKernel */ = {
+			isa = PBXGroup;
+			children = (
+				NXK1000000000000000000001 /* NXKernel.h */,
+				NXK1000000000000000000002 /* NXKernel.m */,
+				NXK1000000000000000000003 /* NXKernelSupport.m */,
+				NXK1000000000000000000004 /* darksword.h */,
+				NXK1000000000000000000005 /* darksword.m */,
+				NXK1000000000000000000006 /* utils.h */,
+				NXK1000000000000000000007 /* utils.m */,
+				NXK1000000000000000000008 /* offsets.h */,
+				NXK1000000000000000000009 /* offsets.m */,
+				NXK2000000000000000000002 /* headers */,
+				NXK2000000000000000000003 /* choma */,
+				NXK2000000000000000000004 /* lib */,
+			);
+			path = NXKernel;
+			sourceTree = "<group>";
+		};
+		NXK2000000000000000000002 /* headers */ = {
+			isa = PBXGroup;
+			children = (
+				NXK100000000000000000000C /* xpf.h */,
+				NXK100000000000000000000D /* libgrabkernel2.h */,
+			);
+			path = headers;
+			sourceTree = "<group>";
+		};
+		NXK2000000000000000000003 /* choma */ = {
+			isa = PBXGroup;
+			children = (
+				NXK100000000000000000000E /* arm64.h */,
+				NXK100000000000000000000F /* Base64.h */,
+				NXK1000000000000000000010 /* BufferedStream.h */,
+				NXK1000000000000000000011 /* CachePatching.h */,
+				NXK1000000000000000000012 /* CodeDirectory.h */,
+				NXK1000000000000000000013 /* CSBlob.h */,
+				NXK1000000000000000000014 /* DER.h */,
+				NXK1000000000000000000015 /* dyld_cache_format.h */,
+				NXK1000000000000000000016 /* DyldSharedCache.h */,
+				NXK1000000000000000000017 /* Entitlements.h */,
+				NXK1000000000000000000018 /* Fat.h */,
+				NXK1000000000000000000019 /* FileStream.h */,
+				NXK100000000000000000001A /* fixup-chains.h */,
+				NXK100000000000000000001B /* Host.h */,
+				NXK100000000000000000001C /* MachO.h */,
+				NXK100000000000000000001D /* MachOByteOrder.h */,
+				NXK100000000000000000001E /* MachOLoadCommand.h */,
+				NXK100000000000000000001F /* MemoryStream.h */,
+				NXK1000000000000000000020 /* PatchFinder_arm64.h */,
+				NXK1000000000000000000021 /* PatchFinder.h */,
+				NXK1000000000000000000022 /* Util.h */,
+			);
+			path = choma;
+			sourceTree = "<group>";
+		};
+		NXK2000000000000000000004 /* lib */ = {
+			isa = PBXGroup;
+			children = (
+				NXK100000000000000000000A /* libxpf.dylib */,
+				NXK100000000000000000000B /* libgrabkernel2.dylib */,
+			);
+			path = lib;
 			sourceTree = "<group>";
 		};
 		A7C4EA1320EE2B050026FFC9 /* Sources */ = {
@@ -305,6 +443,33 @@
 				119EEF8E2B499F2600DF24B5 /* NXExec.h in Headers */,
 				119EEF912B499F3300DF24B5 /* NXUSBDevice.h in Headers */,
 				119EEF922B499F3600DF24B5 /* NXUSBDeviceEnumerator.h in Headers */,
+				NXK0000000000000000000001 /* NXKernel.h in Headers */,
+				NXK0000000000000000000004 /* darksword.h in Headers */,
+				NXK0000000000000000000006 /* utils.h in Headers */,
+				NXK0000000000000000000008 /* offsets.h in Headers */,
+				NXK000000000000000000000C /* xpf.h in Headers */,
+				NXK000000000000000000000D /* libgrabkernel2.h in Headers */,
+				NXK000000000000000000000E /* arm64.h in Headers */,
+				NXK000000000000000000000F /* Base64.h in Headers */,
+				NXK0000000000000000000010 /* BufferedStream.h in Headers */,
+				NXK0000000000000000000011 /* CachePatching.h in Headers */,
+				NXK0000000000000000000012 /* CodeDirectory.h in Headers */,
+				NXK0000000000000000000013 /* CSBlob.h in Headers */,
+				NXK0000000000000000000014 /* DER.h in Headers */,
+				NXK0000000000000000000015 /* dyld_cache_format.h in Headers */,
+				NXK0000000000000000000016 /* DyldSharedCache.h in Headers */,
+				NXK0000000000000000000017 /* Entitlements.h in Headers */,
+				NXK0000000000000000000018 /* Fat.h in Headers */,
+				NXK0000000000000000000019 /* FileStream.h in Headers */,
+				NXK000000000000000000001A /* fixup-chains.h in Headers */,
+				NXK000000000000000000001B /* Host.h in Headers */,
+				NXK000000000000000000001C /* MachO.h in Headers */,
+				NXK000000000000000000001D /* MachOByteOrder.h in Headers */,
+				NXK000000000000000000001E /* MachOLoadCommand.h in Headers */,
+				NXK000000000000000000001F /* MemoryStream.h in Headers */,
+				NXK0000000000000000000020 /* PatchFinder_arm64.h in Headers */,
+				NXK0000000000000000000021 /* PatchFinder.h in Headers */,
+				NXK0000000000000000000022 /* Util.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -449,6 +614,11 @@
 				119EEF8B2B499E5700DF24B5 /* NXLog.m in Sources */,
 				119EEF8A2B499E5400DF24B5 /* NXHekateCustomizer.m in Sources */,
 				119EEF892B499E5100DF24B5 /* NXExec.m in Sources */,
+				NXK0000000000000000000002 /* NXKernel.m in Sources */,
+				NXK0000000000000000000003 /* NXKernelSupport.m in Sources */,
+				NXK0000000000000000000005 /* darksword.m in Sources */,
+				NXK0000000000000000000007 /* utils.m in Sources */,
+				NXK0000000000000000000009 /* offsets.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -552,6 +722,16 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				VERSIONING_SYSTEM = "apple-generic";
 				VERSION_INFO_PREFIX = "";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/lib",
+				);
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/headers",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/choma",
+				);
 			};
 			name = Debug;
 		};
@@ -598,6 +778,16 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				VERSIONING_SYSTEM = "apple-generic";
 				VERSION_INFO_PREFIX = "";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/lib",
+				);
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/headers",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/choma",
+				);
 			};
 			name = Release;
 		};
@@ -699,6 +889,9 @@
 				HEADER_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/NXBootKit",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/headers",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/choma",
 				);
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -707,6 +900,10 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SYSTEM_FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/System/Frameworks-$(PLATFORM_NAME)";
 				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/System/include";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/lib",
+				);
 			};
 			name = Debug;
 		};
@@ -759,6 +956,9 @@
 				HEADER_SEARCH_PATHS = (
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/NXBootKit",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/headers",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/choma",
 				);
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -767,6 +967,10 @@
 				SYSTEM_FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/System/Frameworks-$(PLATFORM_NAME)";
 				SYSTEM_HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/System/include";
 				VALIDATE_PRODUCT = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/NXBootKit/NXKernel/lib",
+				);
 			};
 			name = Release;
 		};

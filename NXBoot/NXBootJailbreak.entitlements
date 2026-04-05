@@ -30,8 +30,29 @@
     <array>
         <string>AppleUSBHostDeviceUserClient</string>
         <string>AppleUSBHostInterfaceUserClient</string>
+        <string>AGXDevice</string>
+        <string>AGXDeviceUserClient</string>
+        <string>AGXSharedUserClient</string>
+        <string>AGXGLContext</string>
+        <string>AGXCommandQueue</string>
+        <string>IOSurfaceRoot</string>
+        <string>IOSurfaceRootUserClient</string>
+        <string>AppleJPEGDriverUserClient</string>
+        <string>H11ANEInDirectPathClient</string>
     </array>
     <key>com.apple.system.diagnostics.iokit-properties</key>
+    <true/>
+
+    <!-- Kernel exploit entitlements (Darksword) -->
+    <key>com.apple.developer.kernel.extended-virtual-addressing</key>
+    <true/>
+    <key>com.apple.developer.kernel.increased-memory-limit</key>
+    <true/>
+    <key>com.apple.private.security.no-sandbox</key>
+    <true/>
+    <key>proc_info-allow</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
     <true/>
 </dict>
 </plist>
