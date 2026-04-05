@@ -113,13 +113,20 @@ uint64_t NXKernelProcByName(const char *name) {
 int NXKernelSandboxEscape(void) {
     uint64_t selfProc = ds_get_our_proc();
     if (!selfProc) {
+        selfProc = procbypid(getpid());
+    }
+    if (!selfProc) {
         selfProc = ourproc();
     }
 
-    nx_internal_log("kernel: running sbx_escape");
-    int sbxResult = sbx_escape(selfProc);
-    if (sbxResult != 0) {
-        nx_internal_log("kernel: sbx_escape failed, continuing to patchcsflags");
+    if (selfProc) {
+        nx_internal_log("kernel: running sbx_escape");
+        int sbxResult = sbx_escape(selfProc);
+        if (sbxResult != 0) {
+            nx_internal_log("kernel: sbx_escape failed, continuing to patchcsflags");
+        }
+    } else {
+        nx_internal_log("kernel: self proc unresolved, skipping sbx_escape and continuing to patchcsflags");
     }
 
     nx_internal_log("kernel: running patchcsflags");

@@ -329,7 +329,13 @@ static int prepareIOKitAccess(void) {
 
     kernel_logf("prepareIOKitAccess: starting process patching");
 
-    uint64_t self = ourproc();
+    uint64_t self = ds_get_our_proc();
+    if (!is_kptr(self)) {
+        self = procbypid(getpid());
+    }
+    if (!is_kptr(self)) {
+        self = ourproc();
+    }
     if (!self) {
         kernel_logf("prepareIOKitAccess: could not resolve our proc");
         return -1;
