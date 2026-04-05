@@ -3,6 +3,7 @@
 #import "FLBootProfile+CoreDataClass.h"
 #import "NXExec.h"
 #import "NXUSBDeviceEnumerator.h"
+#import "NXKernel.h"
 #import "PayloadStorage.h"
 #import "Settings.h"
 
@@ -23,12 +24,27 @@
 @property (nonatomic, strong, nullable) NSString *usbStatus;
 @property (nonatomic, strong, nullable) NSString *usbError;
 
+@property (nonatomic, assign) NXKernelStatus kernelStatus;
+@property (nonatomic, strong, nullable) NSString *kernelStatusText;
+@property (nonatomic, assign) BOOL kernelRunning;
+
 @end
 
 @implementation MainViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+
+    self.kernelStatus = NXKernelStatusNotStarted;
+    self.kernelStatusText = @"Not started";
+    self.kernelRunning = NO;
+
+    if (!NXKernelIsSupported()) {
+        self.kernelStatus = NXKernelStatusFailed;
+        self.kernelStatusText = @"Device not supported";
+    } else if (NXKernelHasOffsets()) {
+        self.kernelStatusText = @"Ready to exploit";
+    }
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(refreshPayloadList)
@@ -53,7 +69,7 @@
     self.usbEnum = [[NXUSBDeviceEnumerator alloc] init];
     self.usbEnum.delegate = self;
     [self.usbEnum setFilterForVendorID:kTegraX1VendorID productID:kTegraX1ProductID];
-    [self.usbEnum start];
+    // USB enum starts stopped; started after kernel exploit succeeds
 
     self.navigationItem.leftBarButtonItem = self.settingsButtonItem;
     self.navigationItem.rightBarButtonItem = self.editButtonItem;
@@ -94,6 +110,50 @@
     [self.usbEnum stop];
 }
 
+- (void)runKernelExploit {
+    self.kernelRunning = YES;
+    self.kernelStatus = NXKernelStatusRunning;
+    self.kernelStatusText = @"Running exploit...";
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
+                  withRowAnimation:UITableViewRowAnimationNone];
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        if (!NXKernelHasOffsets()) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.kernelStatusText = @"Downloading kernelcache...";
+                [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
+                              withRowAnimation:UITableViewRowAnimationNone];
+            });
+            if (!NXKernelDownloadOffsets()) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    self.kernelRunning = NO;
+                    self.kernelStatus = NXKernelStatusFailed;
+                    self.kernelStatusText = @"Failed to download kernelcache";
+                    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
+                                  withRowAnimation:UITableViewRowAnimationNone];
+                });
+                return;
+            }
+        }
+
+        NXKernelInitOffsets();
+        NXKernelStatus status = NXKernelRun();
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.kernelRunning = NO;
+            self.kernelStatus = status;
+            if (status == NXKernelStatusReady) {
+                self.kernelStatusText = @"Ready";
+                [self.usbEnum start];
+            } else {
+                self.kernelStatusText = @"Exploit failed";
+            }
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
+                          withRowAnimation:UITableViewRowAnimationNone];
+        });
+    });
+}
+
 - (void)bootPayload:(Payload *)payload {
     NSData *relocator = [PayloadStorage relocator];
     assert(relocator != nil);
@@ -123,6 +183,7 @@
 #pragma mark - Table
 
 typedef NS_ENUM(NSInteger, TableSection) {
+    TableSectionKernel,
     TableSectionLinks,
     TableSectionDevice,
     TableSectionPayloads,
@@ -186,11 +247,12 @@ typedef NS_ENUM(NSInteger, TableSection) {
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 3;
+    return 4;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     switch (section) {
+        case TableSectionKernel: return 1;
         case TableSectionLinks: return 2;
         case TableSectionDevice: return 1;
         case TableSectionPayloads: {
@@ -208,6 +270,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     switch (section) {
+        case TableSectionKernel: return @"Kernel Exploit";
         case TableSectionDevice: return @"Device";
         case TableSectionPayloads: return @"Payloads";
     }
@@ -230,6 +293,21 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     switch (indexPath.section) {
+        case TableSectionKernel: {
+            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
+            cell.textLabel.text = self.kernelRunning ? @"Running exploit..." : self.kernelStatusText;
+            if (self.kernelStatus == NXKernelStatusReady) {
+                cell.textLabel.textColor = [UIColor systemGreenColor];
+            } else if (self.kernelStatus == NXKernelStatusFailed) {
+                cell.textLabel.textColor = [UIColor systemRedColor];
+            } else if (self.kernelRunning) {
+                cell.textLabel.textColor = [UIColor systemOrangeColor];
+            } else {
+                cell.textLabel.textColor = self.textColorButton;
+            }
+            cell.accessoryType = self.kernelRunning ? UITableViewCellAccessoryNone : UITableViewCellAccessoryDisclosureIndicator;
+            return cell;
+        }
         case TableSectionLinks: {
             UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
             [self configureLinkCell:cell];
@@ -376,6 +454,11 @@ typedef NS_ENUM(NSInteger, TableSection) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [self.tableView deselectRowAtIndexPath:indexPath animated:YES];
     switch (indexPath.section) {
+        case TableSectionKernel:
+            if (!self.kernelRunning && self.kernelStatus != NXKernelStatusReady) {
+                [self runKernelExploit];
+            }
+            break;
         case TableSectionLinks:
             switch (indexPath.row) {
                 case 0:

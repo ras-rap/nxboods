@@ -117,7 +117,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "mkdir -p \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\ncp -f \"$PROJECT_DIR/NXBootKit/NXKernel/lib/libxpf.dylib\" \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/\"\ncp -f \"$PROJECT_DIR/NXBootKit/NXKernel/lib/libgrabkernel2.dylib\" \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/\"\n";
+			shellScript = "mkdir -p \"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\ncp -f \"${PROJECT_DIR}/NXBootKit/NXKernel/lib/libxpf.dylib\" \"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/\"\ncp -f \"${PROJECT_DIR}/NXBootKit/NXKernel/lib/libgrabkernel2.dylib\" \"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/\"\n";
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -894,6 +894,10 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/NXBootKit/NXKernel/lib",
 				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 			};
 			name = Debug;
 		};
@@ -960,6 +964,10 @@
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/NXBootKit/NXKernel/lib",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
 				);
 			};
 			name = Release;
