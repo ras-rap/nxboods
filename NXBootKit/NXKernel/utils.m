@@ -329,6 +329,18 @@ static uint32_t find_task_flags_offset(uint64_t task) {
     return 0;
 }
 
+static bool kwrite32_retry(uint64_t address, uint32_t value, int attempts) {
+    if (attempts < 1) attempts = 1;
+    for (int i = 0; i < attempts; i++) {
+        ds_kwrite32(address, value);
+        if (ds_kread32(address) == value) {
+            return true;
+        }
+        usleep(2000);
+    }
+    return false;
+}
+
 static int prepareIOKitAccess(void) {
     if (!ds_is_ready()) {
         kernel_logf("prepareIOKitAccess: darksword not ready");
@@ -426,8 +438,7 @@ static int prepareIOKitAccess(void) {
     };
 
     for (size_t i = 0; i < sizeof(ucredWrites) / sizeof(ucredWrites[0]); i++) {
-        ds_kwrite32(ucred + ucredWrites[i].offset, ucredWrites[i].value);
-        if (ds_kread32(ucred + ucredWrites[i].offset) != ucredWrites[i].value) {
+        if (!kwrite32_retry(ucred + ucredWrites[i].offset, ucredWrites[i].value, 8)) {
             kernel_logf("prepareIOKitAccess: %s verify failed (non-critical)", ucredWrites[i].name);
             hadNonCriticalFailures = true;
         }
