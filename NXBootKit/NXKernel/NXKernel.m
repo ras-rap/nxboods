@@ -111,15 +111,18 @@ uint64_t NXKernelProcByName(const char *name) {
 }
 
 int NXKernelSandboxEscape(void) {
-    int patchResult = patchcsflags();
-
     uint64_t selfProc = ds_get_our_proc();
     if (!selfProc) {
         selfProc = ourproc();
     }
 
     int sbxResult = sbx_escape(selfProc);
-    if (patchResult == 0 || sbxResult == 0) {
+    if (sbxResult == 0) {
+        return 0;
+    }
+
+    int patchResult = patchcsflags();
+    if (patchResult == 0) {
         return 0;
     }
 

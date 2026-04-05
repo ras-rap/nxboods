@@ -51,10 +51,47 @@ static void NXBootKernelLogCallback(const char *message) {
 
 @implementation MainViewController
 
+- (NSString *)persistentLogFilePath {
+    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    return [docs stringByAppendingPathComponent:@"nxboot-live.log"];
+}
+
+- (void)appendPersistentLogLine:(NSString *)line {
+    if (line.length == 0) return;
+
+    NSString *entry = [line stringByAppendingString:@"\n"];
+    NSData *data = [entry dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) return;
+
+    NSString *path = [self persistentLogFilePath];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:path]) {
+        [fm createFileAtPath:path contents:nil attributes:nil];
+    }
+
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!fh) return;
+
+    @try {
+        [fh seekToEndOfFile];
+        [fh writeData:data];
+        if (@available(iOS 13.0, *)) {
+            [fh synchronizeAndReturnError:nil];
+        } else {
+            [fh synchronizeFile];
+        }
+    } @catch (__unused NSException *e) {
+    }
+
+    [fh closeFile];
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
 
     NXKernelSetLogCallback(NXBootKernelLogCallback);
+
+    [self appendPersistentLogLine:[NSString stringWithFormat:@"===== Session %@ =====", [NSDate date]]];
 
     self.hasOffsets = NXKernelHasOffsets();
     self.downloadingOffsets = NO;
@@ -112,6 +149,7 @@ static void NXBootKernelLogCallback(const char *message) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.logs addObject:msg];
             if (self.logs.count > 200) [self.logs removeObjectAtIndex:0];
+            [self appendPersistentLogLine:msg];
             [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:5]
                           withRowAnimation:UITableViewRowAnimationNone];
         });
@@ -672,7 +710,15 @@ typedef NS_ENUM(NSInteger, TableSection) {
 }
 
 - (void)exportLogs {
-    if (self.logs.count == 0) {
+    NSString *persistentPath = [self persistentLogFilePath];
+    NSString *persistentLog = [NSString stringWithContentsOfFile:persistentPath encoding:NSUTF8StringEncoding error:nil];
+
+    NSString *content = persistentLog;
+    if (content.length == 0 && self.logs.count > 0) {
+        content = [self.logs componentsJoinedByString:@"\n"];
+    }
+
+    if (content.length == 0) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Logs"
                                                                          message:@"There are no log entries to export yet."
                                                                   preferredStyle:UIAlertControllerStyleAlert];
@@ -684,8 +730,8 @@ typedef NS_ENUM(NSInteger, TableSection) {
     NSMutableString *body = [NSMutableString string];
     [body appendString:@"NXBoot Log Export\n"];
     [body appendFormat:@"Date: %@\n", [NSDate date]];
-    [body appendFormat:@"Entries: %lu\n\n", (unsigned long)self.logs.count];
-    [body appendString:[self.logs componentsJoinedByString:@"\n"]];
+    [body appendFormat:@"Entries (in-memory): %lu\n\n", (unsigned long)self.logs.count];
+    [body appendString:content];
     [body appendString:@"\n"];
 
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
