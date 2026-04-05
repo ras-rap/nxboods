@@ -25,6 +25,8 @@ uint64_t getprocsize(void);
 bool haskernproc(void);
 NSString *getkerncache(void);
 void clearkerncachedata(void);
+uint64_t getcsflagsoffset(void);
+uint64_t getucredooffset(void);
 
 #ifdef __cplusplus
 }

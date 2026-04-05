@@ -7,57 +7,353 @@
 #import "PayloadStorage.h"
 #import "Settings.h"
 
-@interface MainViewController () <
-        NXUSBDeviceEnumeratorDelegate,
-        UIAdaptivePresentationControllerDelegate,
-        UIDocumentPickerDelegate>
+#pragma mark - Exploit Tab
 
+@interface ExploitViewController : UITableViewController
 @property (nonatomic, strong) UIColor *textColorButton;
 @property (nonatomic, strong) UIColor *textColorInactive;
-@property (nonatomic, strong) NSDateFormatter *payloadDateFormatter;
-@property (nonatomic, strong) PayloadStorage *payloadStorage;
-@property (nonatomic, strong) NSMutableArray<Payload *> *payloads;
-
-@property (nonatomic, strong, nullable) Payload *selectedPayload;
-@property (nonatomic, strong) NXUSBDeviceEnumerator *usbEnum;
-@property (nonatomic, strong, nullable) NXUSBDevice *usbDevice;
-@property (nonatomic, strong, nullable) NSString *usbStatus;
-@property (nonatomic, strong, nullable) NSString *usbError;
-
-// Kernel exploit state
 @property (nonatomic, assign) BOOL hasOffsets;
 @property (nonatomic, assign) BOOL downloadingOffsets;
 @property (nonatomic, assign) BOOL exploitRunning;
 @property (nonatomic, assign) BOOL exploitReady;
+@property (nonatomic, assign) BOOL patchingEntitlements;
+@property (nonatomic, assign) BOOL entitlementsPatched;
 @property (nonatomic, assign) BOOL exploitFailed;
 @property (nonatomic, assign) double exploitProgress;
 @property (nonatomic, strong, nullable) NSString *kernelBaseText;
 @property (nonatomic, strong, nullable) NSString *kernelSlideText;
-
+@property (nonatomic, strong, nullable) NSMutableArray<NSString *> *logs;
 @end
 
-@implementation MainViewController
+@implementation ExploitViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.title = @"Exploit";
+    if (@available(iOS 13, *)) {
+        self.tabBarItem.image = [UIImage systemImageNamed:@"bolt.fill"];
+    } else {
+        self.tabBarItem.image = [UIImage imageNamed:@""];
+    }
+
+    self.textColorButton = [UIColor colorWithRed:0.001 green:0.732 blue:0.883 alpha:1.0];
+    if (@available(iOS 13, *)) {
+        self.textColorInactive = [UIColor secondaryLabelColor];
+    } else {
+        self.textColorInactive = [UIColor colorWithRed:0.235 green:0.235 blue:0.263 alpha:0.6];
+    }
 
     self.hasOffsets = NXKernelHasOffsets();
     self.downloadingOffsets = NO;
     self.exploitRunning = NO;
     self.exploitReady = NO;
+    self.patchingEntitlements = NO;
+    self.entitlementsPatched = NO;
     self.exploitFailed = NO;
     self.exploitProgress = 0.0;
     self.kernelBaseText = nil;
     self.kernelSlideText = nil;
+    self.logs = [NSMutableArray array];
+
+    self.tableView.estimatedRowHeight = 44;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
 
     if (!NXKernelIsSupported()) {
         self.exploitFailed = YES;
     }
 
     [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(refreshPayloadList)
-                                                 name:NXBootPayloadStorageChangedExternally
+                                             selector:@selector(appendLog:)
+                                                 name:@"NXKernelLog"
                                                object:nil];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)appendLog:(NSNotification *)note {
+    NSString *msg = note.userInfo[@"message"];
+    if (msg) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.logs addObject:msg];
+            if (self.logs.count > 200) {
+                [self.logs removeObjectAtIndex:0];
+            }
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
+                          withRowAnimation:UITableViewRowAnimationNone];
+        });
+    }
+}
+
+- (void)downloadOffsets {
+    if (self.downloadingOffsets || self.exploitRunning) return;
+    self.downloadingOffsets = YES;
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        BOOL ok = NXKernelDownloadOffsets();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.downloadingOffsets = NO;
+            self.hasOffsets = ok;
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
+            if (!ok) {
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Download Failed"
+                                                                             message:@"Could not download kernelcache. Check your internet connection."
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:alert animated:YES completion:nil];
+            }
+        });
+    });
+}
+
+- (void)runExploit {
+    if (self.exploitRunning || !self.hasOffsets) return;
+    self.exploitRunning = YES;
+    self.exploitProgress = 0.0;
+    self.exploitFailed = NO;
+    [self.logs removeAllObjects];
+    [self.tableView reloadData];
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NXKernelInitOffsets();
+        NXKernelStatus status = NXKernelRun();
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.exploitRunning = NO;
+            self.exploitProgress = 1.0;
+            if (status == NXKernelStatusReady) {
+                self.exploitReady = YES;
+                self.kernelBaseText = [NSString stringWithFormat:@"0x%llx", NXKernelGetBase()];
+                self.kernelSlideText = [NSString stringWithFormat:@"0x%llx", NXKernelGetSlide()];
+                [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];
+            } else {
+                self.exploitFailed = YES;
+                [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];
+            }
+        });
+    });
+}
+
+- (void)patchEntitlements {
+    if (self.patchingEntitlements || self.entitlementsPatched || !self.exploitReady) return;
+    self.patchingEntitlements = YES;
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        int result = NXKernelPatchCSFlags();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.patchingEntitlements = NO;
+            self.entitlementsPatched = (result == 0);
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+            if (!self.entitlementsPatched) {
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Patch Failed"
+                                                                             message:@"Could not patch code signing flags. USB access may not work."
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:alert animated:YES completion:nil];
+            } else {
+                // Notify the switch tab that USB can now start
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelEntitlementsPatched" object:nil];
+            }
+        });
+    });
+}
+
+#pragma mark - Table Data Source
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 4;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    switch (section) {
+        case 0: return 1;
+        case 1: return 1;
+        case 2: return 1;
+        case 3: return self.logs.count > 0 ? self.logs.count : 1;
+    }
+    return 0;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    switch (section) {
+        case 0: return @"Step 1 — Kernelcache";
+        case 1: return @"Step 2 — Exploit";
+        case 2: return @"Step 3 — Entitlements";
+        case 3: return @"Log";
+    }
+    return nil;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    switch (section) {
+        case 0: return @"Download and resolve kernel offsets. This is a one-time operation.";
+        case 1: return @"Run the Darksword IOSurface/ICMPv6 exploit to gain kernel read/write.";
+        case 2: return @"Patch code signing flags to grant unrestricted IOKit access (required for USB).";
+        case 3: return nil;
+    }
+    return nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    switch (indexPath.section) {
+        case 0: {
+            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"StepCell" forIndexPath:indexPath];
+            if (self.hasOffsets) {
+                cell.textLabel.text = @"Offsets cached ✓";
+                cell.textLabel.textColor = [UIColor systemGreenColor];
+                cell.detailTextLabel.text = @"Ready for exploit";
+                cell.accessoryType = UITableViewCellAccessoryCheckmark;
+                cell.userInteractionEnabled = NO;
+            } else if (self.downloadingOffsets) {
+                cell.textLabel.text = @"Downloading kernelcache...";
+                cell.textLabel.textColor = [UIColor systemOrangeColor];
+                cell.detailTextLabel.text = nil;
+                cell.accessoryType = UITableViewCellAccessoryNone;
+                cell.userInteractionEnabled = NO;
+            } else {
+                cell.textLabel.text = @"Download Kernelcache Offsets";
+                cell.textLabel.textColor = self.textColorButton;
+                cell.detailTextLabel.text = @"One-time download (~30 MB)";
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                cell.userInteractionEnabled = YES;
+            }
+            return cell;
+        }
+        case 1: {
+            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"StepCell" forIndexPath:indexPath];
+            if (self.exploitRunning) {
+                cell.textLabel.text = [NSString stringWithFormat:@"Running exploit... %d%%", (int)(self.exploitProgress * 100)];
+                cell.textLabel.textColor = [UIColor systemOrangeColor];
+                cell.detailTextLabel.text = nil;
+                cell.accessoryType = UITableViewCellAccessoryNone;
+                cell.userInteractionEnabled = NO;
+            } else if (self.exploitReady) {
+                cell.textLabel.text = @"Exploit succeeded ✓";
+                cell.textLabel.textColor = [UIColor systemGreenColor];
+                cell.detailTextLabel.text = [NSString stringWithFormat:@"Base: %@  Slide: %@", self.kernelBaseText, self.kernelSlideText];
+                cell.accessoryType = UITableViewCellAccessoryCheckmark;
+                cell.userInteractionEnabled = NO;
+            } else if (self.exploitFailed) {
+                cell.textLabel.text = @"Exploit failed — tap to retry";
+                cell.textLabel.textColor = [UIColor systemRedColor];
+                cell.detailTextLabel.text = nil;
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                cell.userInteractionEnabled = YES;
+            } else if (!self.hasOffsets) {
+                cell.textLabel.text = @"Run Exploit";
+                cell.textLabel.textColor = self.textColorInactive;
+                cell.detailTextLabel.text = @"Download offsets first";
+                cell.accessoryType = UITableViewCellAccessoryNone;
+                cell.userInteractionEnabled = NO;
+            } else {
+                cell.textLabel.text = @"Run Exploit";
+                cell.textLabel.textColor = self.textColorButton;
+                cell.detailTextLabel.text = @"Darksword IOSurface/ICMPv6";
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                cell.userInteractionEnabled = YES;
+            }
+            return cell;
+        }
+        case 2: {
+            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"StepCell" forIndexPath:indexPath];
+            if (self.entitlementsPatched) {
+                cell.textLabel.text = @"Entitlements patched ✓";
+                cell.textLabel.textColor = [UIColor systemGreenColor];
+                cell.detailTextLabel.text = @"IOKit USB access granted";
+                cell.accessoryType = UITableViewCellAccessoryCheckmark;
+                cell.userInteractionEnabled = NO;
+            } else if (self.patchingEntitlements) {
+                cell.textLabel.text = @"Patching csflags...";
+                cell.textLabel.textColor = [UIColor systemOrangeColor];
+                cell.detailTextLabel.text = nil;
+                cell.accessoryType = UITableViewCellAccessoryNone;
+                cell.userInteractionEnabled = NO;
+            } else if (!self.exploitReady) {
+                cell.textLabel.text = @"Patch Entitlements";
+                cell.textLabel.textColor = self.textColorInactive;
+                cell.detailTextLabel.text = @"Exploit kernel first";
+                cell.accessoryType = UITableViewCellAccessoryNone;
+                cell.userInteractionEnabled = NO;
+            } else {
+                cell.textLabel.text = @"Patch Entitlements";
+                cell.textLabel.textColor = self.textColorButton;
+                cell.detailTextLabel.text = @"CS_PLATFORM_BINARY + CS_DEBUGGED";
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+                cell.userInteractionEnabled = YES;
+            }
+            return cell;
+        }
+        case 3: {
+            if (self.logs.count == 0) {
+                UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"LogCell"];
+                if (!cell) {
+                    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"LogCell"];
+                    cell.textLabel.font = [UIFont fontWithName:@"Menlo" size:11];
+                    cell.textLabel.numberOfLines = 0;
+                }
+                cell.textLabel.text = @"No log entries yet";
+                cell.textLabel.textColor = self.textColorInactive;
+                return cell;
+            } else {
+                NSString *msg = self.logs[indexPath.row];
+                UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"LogCell"];
+                if (!cell) {
+                    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"LogCell"];
+                    cell.textLabel.font = [UIFont fontWithName:@"Menlo" size:11];
+                    cell.textLabel.numberOfLines = 0;
+                }
+                cell.textLabel.text = msg;
+                return cell;
+            }
+        }
+    }
+    return nil;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    switch (indexPath.section) {
+        case 0:
+            if (!self.hasOffsets && !self.downloadingOffsets) [self downloadOffsets];
+            break;
+        case 1:
+            if (self.hasOffsets && !self.exploitRunning && !self.exploitReady) [self runExploit];
+            break;
+        case 2:
+            if (self.exploitReady && !self.patchingEntitlements && !self.entitlementsPatched) [self patchEntitlements];
+            break;
+    }
+}
+
+@end
+
+#pragma mark - Switch Tab
+
+@interface SwitchViewController : UITableViewController
+@property (nonatomic, strong) UIColor *textColorButton;
+@property (nonatomic, strong) UIColor *textColorInactive;
+@property (nonatomic, strong) NSDateFormatter *payloadDateFormatter;
+@property (nonatomic, strong) PayloadStorage *payloadStorage;
+@property (nonatomic, strong) NSMutableArray<Payload *> *payloads;
+@property (nonatomic, strong, nullable) Payload *selectedPayload;
+@property (nonatomic, strong) NXUSBDeviceEnumerator *usbEnum;
+@property (nonatomic, strong, nullable) NXUSBDevice *usbDevice;
+@property (nonatomic, strong, nullable) NSString *usbStatus;
+@property (nonatomic, strong, nullable) NSString *usbError;
+@property (nonatomic, assign) BOOL entitlementsPatched;
+@end
+
+@implementation SwitchViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Switch";
+    if (@available(iOS 13, *)) {
+        self.tabBarItem.image = [UIImage systemImageNamed:"gamecontroller.fill"];
+    }
 
     self.textColorButton = [UIColor colorWithRed:0.001 green:0.732 blue:0.883 alpha:1.0];
     if (@available(iOS 13, *)) {
@@ -72,44 +368,22 @@
 
     self.payloadStorage = [PayloadStorage sharedPayloadStorage];
     self.payloads = [[self.payloadStorage loadPayloads] mutableCopy];
-    [self restoreRememberedPayload];
 
     self.usbEnum = [[NXUSBDeviceEnumerator alloc] init];
     self.usbEnum.delegate = self;
     [self.usbEnum setFilterForVendorID:kTegraX1VendorID productID:kTegraX1ProductID];
-    // USB enum starts stopped; started after kernel exploit succeeds
+    // Don't start until entitlements are patched
 
-    self.navigationItem.leftBarButtonItem = self.settingsButtonItem;
-    self.navigationItem.rightBarButtonItem = self.editButtonItem;
-}
+    self.entitlementsPatched = NO;
 
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    [self restoreRememberedPayload];
-}
-
-- (void)restoreRememberedPayload {
-    if (!Settings.rememberPayload) {
-        return;
-    }
-
-    NSString *payloadFileName = Settings.lastPayloadFileName;
-    if (!payloadFileName) {
-        return;
-    }
-
-    for (Payload *payload in self.payloads) {
-        if ([payload.path.lastPathComponent isEqualToString:payloadFileName]) {
-            if (self.selectedPayload) {
-                [self cellForPayload:self.selectedPayload].accessoryType = UITableViewCellAccessoryNone;
-            }
-            self.selectedPayload = payload;
-            [self cellForPayload:payload].accessoryType = UITableViewCellAccessoryCheckmark;
-            return;
-        }
-    }
-
-    Settings.lastPayloadFileName = nil;
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(entitlementsPatchedNotification:)
+                                                 name:@"NXKernelEntitlementsPatched"
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(refreshPayloadList)
+                                                 name:NXBootPayloadStorageChangedExternally
+                                               object:nil];
 }
 
 - (void)dealloc {
@@ -117,88 +391,27 @@
     [self.usbEnum stop];
 }
 
-#pragma mark - Kernel Exploit
-
-- (void)downloadOffsets {
-    if (self.downloadingOffsets || self.exploitRunning) return;
-
-    self.downloadingOffsets = YES;
-    [self reloadKernelSection];
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        BOOL ok = NXKernelDownloadOffsets();
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.downloadingOffsets = NO;
-            self.hasOffsets = ok;
-            [self reloadKernelSection];
-            if (!ok) {
-                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Download Failed"
-                                                                             message:@"Could not download kernelcache. Check your internet connection and try again."
-                                                                      preferredStyle:UIAlertControllerStyleAlert];
-                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:alert animated:YES completion:nil];
-            }
-        });
-    });
+- (void)entitlementsPatchedNotification:(NSNotification *)note {
+    self.entitlementsPatched = YES;
+    [self.usbEnum start];
+    [self.tableView reloadData];
 }
 
-- (void)runExploit {
-    if (self.exploitRunning || !self.hasOffsets) return;
-
-    self.exploitRunning = YES;
-    self.exploitProgress = 0.0;
-    self.exploitFailed = NO;
-    [self reloadKernelSection];
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NXKernelInitOffsets();
-        NXKernelStatus status = NXKernelRun();
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.exploitRunning = NO;
-            self.exploitProgress = 1.0;
-            if (status == NXKernelStatusReady) {
-                self.exploitReady = YES;
-                self.kernelBaseText = [NSString stringWithFormat:@"0x%llx", NXKernelGetBase()];
-                self.kernelSlideText = [NSString stringWithFormat:@"0x%llx", NXKernelGetSlide()];
-
-                // Patch csflags to CS_PLATFORM_BINARY so IOKit grants USB access
-                // without requiring private entitlements in the provisioning profile
-                int p = NXKernelPatchCSFlags();
-                if (p == 0) {
-                    NSLog(@"[kernel] csflags patched — IOKit USB access granted");
-                } else {
-                    NSLog(@"[kernel] csflags patch failed (%d) — USB may not work", p);
-                }
-
-                [self.usbEnum start];
-            } else {
-                self.exploitFailed = YES;
-            }
-            [self reloadKernelSection];
-        });
-    });
+- (void)refreshPayloadList {
+    self.payloads = [[self.payloadStorage loadPayloads] mutableCopy];
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationAutomatic];
 }
-
-- (void)reloadKernelSection {
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
-                  withRowAnimation:UITableViewRowAnimationNone];
-}
-
-#pragma mark - Switch Boot
 
 - (void)bootPayload:(Payload *)payload {
     NSData *relocator = [PayloadStorage relocator];
-    assert(relocator != nil);
-
+    if (!relocator) return;
     NSData *payloadData = payload.data;
     if (!payloadData) {
-        self.usbError = @"Failed to load payload data from disk. Please check file permissions.";
+        self.usbError = @"Failed to load payload data from disk.";
         [self updateDeviceStatus:@"Error loading payload"];
         return;
     }
-
-    assert(self.usbDevice != nil);
+    if (!self.usbDevice) return;
     NSString *error = nil;
     if (NXExec(self.usbDevice, relocator, payloadData, &error)) {
         self.usbError = nil;
@@ -207,91 +420,26 @@
         self.usbError = error;
         [self updateDeviceStatus:@"Payload injection error"];
     }
+    if (error) NSLog(@"Switch boot failed: %@", error);
+}
 
-    if (error) {
-        NSLog(@"Switch boot failed: %@", error);
-    }
+- (void)updateDeviceStatus:(NSString *)status {
+    self.usbStatus = status;
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
 }
 
 #pragma mark - Table
 
-typedef NS_ENUM(NSInteger, TableSection) {
-    TableSectionKernel,
-    TableSectionLinks,
-    TableSectionDevice,
-    TableSectionPayloads,
-};
-
-- (void)refreshPayloadList {
-    [self.tableView beginUpdates];
-    [self.refreshControl endRefreshing];
-    [self setEditing:NO animated:YES];
-    self.payloads = [[self.payloadStorage loadPayloads] mutableCopy];
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionPayloads]
-                  withRowAnimation:UITableViewRowAnimationAutomatic];
-    [self.tableView endUpdates];
-    [self restoreRememberedPayload];
-}
-
-- (IBAction)refreshPayloadList:(id)sender {
-    [self refreshPayloadList];
-}
-
-- (void)setEditing:(BOOL)editing animated:(BOOL)animated {
-    BOOL wasEditing = self.isEditing;
-    UITableViewRowAnimation animation = animated ? UITableViewRowAnimationAutomatic : UITableViewRowAnimationNone;
-
-    [self.tableView beginUpdates];
-
-    if (editing && !wasEditing && self.selectedPayload) {
-        [self cellForPayload:self.selectedPayload].accessoryType = UITableViewCellAccessoryNone;
-        self.selectedPayload = nil;
-    }
-
-    [super setEditing:editing animated:animated];
-
-    NSInteger nlinks = [self tableView:self.tableView numberOfRowsInSection:TableSectionLinks];
-    for (NSInteger row = 0; row < nlinks; row++) {
-        NSIndexPath *indexPath = [NSIndexPath indexPathForRow:row inSection:TableSectionLinks];
-        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-        [self configureLinkCell:cell];
-    }
-
-    NSIndexPath *newPayloadPath = [NSIndexPath indexPathForRow:self.payloads.count inSection:TableSectionPayloads];
-    if (self.payloads.count != 0) {
-        if (editing && !wasEditing) {
-            [self.tableView insertRowsAtIndexPaths:@[newPayloadPath] withRowAnimation:animation];
-        } else if (!editing && wasEditing) {
-            [self.tableView deleteRowsAtIndexPaths:@[newPayloadPath] withRowAnimation:animation];
-        }
-    }
-
-    [self.tableView footerViewForSection:TableSectionPayloads].textLabel.text = [self tableView:self.tableView titleForFooterInSection:TableSectionPayloads];
-
-    [self.tableView endUpdates];
-
-    if (!editing && wasEditing) {
-        [self restoreRememberedPayload];
-    }
-}
-
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 4;
+    return 2;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     switch (section) {
-        case TableSectionKernel: return 3;
-        case TableSectionLinks: return 2;
-        case TableSectionDevice: return 1;
-        case TableSectionPayloads: {
-            if (self.payloads.count == 0) {
-                return 1;
-            } else if (self.isEditing) {
-                return self.payloads.count + 1;
-            } else {
-                return self.payloads.count;
-            }
+        case 0: return 1;
+        case 1: {
+            if (self.payloads.count == 0) return 1;
+            return self.payloads.count;
         }
     }
     return 0;
@@ -299,152 +447,46 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     switch (section) {
-        case TableSectionKernel: return @"Darksword Exploit";
-        case TableSectionDevice: return @"Nintendo Switch";
-        case TableSectionPayloads: return @"Payloads";
+        case 0: return @"Device";
+        case 1: return @"Payloads";
     }
-    return [super tableView:tableView titleForHeaderInSection:section];
+    return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     switch (section) {
-        case TableSectionKernel: {
-            if (self.exploitReady) {
-                NSMutableString *s = [NSMutableString stringWithFormat:@"Kernel base: %@  Slide: %@", self.kernelBaseText, self.kernelSlideText];
-                if (self.kernelBaseText) {
-                    [s appendFormat:@"\nKernel base: %@  Slide: %@", self.kernelBaseText, self.kernelSlideText];
-                }
-                return s;
-            }
-            return @"Step 1: Download kernelcache offsets (one-time). Step 2: Run the exploit to gain kernel read/write. The Switch section below will unlock after a successful exploit.";
+        case 0: {
+            if (self.usbError) return self.usbError;
+            if (!self.entitlementsPatched) return @"Patch entitlements in the Exploit tab first to enable USB access.";
+            return @"Connect your Nintendo Switch in RCM mode via a Lightning OTG adapter.";
         }
-        case TableSectionDevice:
-            return [self footerForDeviceCell];
-        case TableSectionPayloads:
-            if (self.isEditing) {
-                return @"Tap a payload to change its name.";
-            } else {
-                return @"Activate a payload to boot it automatically. Use the Edit button to organize your payloads.";
-            }
+        case 1: return @"Activate a payload to boot it automatically.";
     }
-    return [super tableView:tableView titleForFooterInSection:section];
+    return nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     switch (indexPath.section) {
-        case TableSectionKernel: {
-            switch (indexPath.row) {
-                case 0: {
-                    // Step 1: Download offsets
-                    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
-                    if (self.hasOffsets) {
-                        cell.textLabel.text = @"Offsets cached";
-                        cell.textLabel.textColor = [UIColor systemGreenColor];
-                        cell.accessoryType = UITableViewCellAccessoryCheckmark;
-                        cell.userInteractionEnabled = NO;
-                    } else if (self.downloadingOffsets) {
-                        cell.textLabel.text = @"Downloading kernelcache...";
-                        cell.textLabel.textColor = [UIColor systemOrangeColor];
-                        cell.accessoryType = UITableViewCellAccessoryNone;
-                        cell.userInteractionEnabled = NO;
-                    } else if (self.exploitFailed) {
-                        cell.textLabel.text = @"Download offsets";
-                        cell.textLabel.textColor = self.textColorButton;
-                        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-                        cell.userInteractionEnabled = YES;
-                    } else {
-                        cell.textLabel.text = @"Download Kernelcache Offsets";
-                        cell.textLabel.textColor = self.textColorButton;
-                        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-                        cell.userInteractionEnabled = YES;
-                    }
-                    return cell;
-                }
-                case 1: {
-                    // Step 2: Run exploit
-                    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
-                    if (self.exploitRunning) {
-                        cell.textLabel.text = [NSString stringWithFormat:@"Running exploit... %d%%", (int)(self.exploitProgress * 100)];
-                        cell.textLabel.textColor = [UIColor systemOrangeColor];
-                        cell.accessoryType = UITableViewCellAccessoryNone;
-                        cell.userInteractionEnabled = NO;
-                    } else if (self.exploitReady) {
-                        cell.textLabel.text = @"Exploit succeeded";
-                        cell.textLabel.textColor = [UIColor systemGreenColor];
-                        cell.accessoryType = UITableViewCellAccessoryCheckmark;
-                        cell.userInteractionEnabled = NO;
-                    } else if (self.exploitFailed) {
-                        cell.textLabel.text = @"Exploit failed — tap to retry";
-                        cell.textLabel.textColor = [UIColor systemRedColor];
-                        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-                        cell.userInteractionEnabled = YES;
-                    } else if (!self.hasOffsets) {
-                        cell.textLabel.text = @"Run Exploit";
-                        cell.textLabel.textColor = self.textColorInactive;
-                        cell.accessoryType = UITableViewCellAccessoryNone;
-                        cell.userInteractionEnabled = NO;
-                    } else {
-                        cell.textLabel.text = @"Run Exploit";
-                        cell.textLabel.textColor = self.textColorButton;
-                        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-                        cell.userInteractionEnabled = YES;
-                    }
-                    return cell;
-                }
-                case 2: {
-                    // Progress bar
-                    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ProgressCell"];
-                    if (!cell) {
-                        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"ProgressCell"];
-                        UIProgressView *pv = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-                        pv.tag = 999;
-                        pv.translatesAutoresizingMaskIntoConstraints = NO;
-                        [cell.contentView addSubview:pv];
-                        [NSLayoutConstraint activateConstraints:@[
-                            [pv.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:15],
-                            [pv.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
-                            [pv.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-                        ]];
-                    }
-                    UIProgressView *pv = (UIProgressView *)[cell viewWithTag:999];
-                    pv.progress = (float)self.exploitProgress;
-                    pv.hidden = !self.exploitRunning;
-                    return cell;
-                }
-            }
-            break;
-        }
-        case TableSectionLinks: {
-            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
-            [self configureLinkCell:cell];
-            switch (indexPath.row) {
-                case 0:
-                    cell.textLabel.text = @"Getting Started";
-                    break;
-                case 1:
-                    cell.textLabel.text = @"About";
-                    break;
-            }
-            return cell;
-        }
-        case TableSectionDevice: {
+        case 0: {
             UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"DeviceCell" forIndexPath:indexPath];
-            [self configureDeviceCell:cell];
-            // Grey out until exploit is ready
-            cell.textLabel.enabled = self.exploitReady;
-            cell.detailTextLabel.enabled = self.exploitReady;
-            if (!self.exploitReady) {
-                cell.textLabel.text = @"Nintendo Switch";
-                cell.detailTextLabel.text = @"Exploit kernel first to enable Switch support";
+            if (!self.entitlementsPatched) {
+                cell.textLabel.text = @"USB Not Available";
+                cell.detailTextLabel.text = @"Patch entitlements first";
+                cell.textLabel.enabled = NO;
+                cell.detailTextLabel.enabled = NO;
+            } else {
+                cell.textLabel.text = self.usbDevice ? @"Nintendo Switch Connected" : @"No Connection";
+                cell.detailTextLabel.text = self.usbStatus ?: @"Ready for APX USB device...";
+                cell.textLabel.enabled = YES;
+                cell.detailTextLabel.enabled = YES;
             }
             return cell;
         }
-        case TableSectionPayloads: {
-            if (indexPath.row == self.payloads.count) {
+        case 1: {
+            if (self.payloads.count == 0) {
                 UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
-                cell.accessoryType = UITableViewCellAccessoryNone;
                 cell.textLabel.text = @"Add Payload";
-                cell.textLabel.enabled = self.exploitReady;
+                cell.textLabel.enabled = self.entitlementsPatched;
                 return cell;
             } else {
                 UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"PayloadCell" forIndexPath:indexPath];
@@ -454,8 +496,8 @@ typedef NS_ENUM(NSInteger, TableSection) {
                 cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ (%llu KiB)",
                                              [self.payloadDateFormatter stringFromDate:payload.fileDate],
                                              payload.fileSize / 1024];
-                cell.textLabel.enabled = self.exploitReady;
-                cell.detailTextLabel.enabled = self.exploitReady;
+                cell.textLabel.enabled = self.entitlementsPatched;
+                cell.detailTextLabel.enabled = self.entitlementsPatched;
                 return cell;
             }
         }
@@ -463,145 +505,23 @@ typedef NS_ENUM(NSInteger, TableSection) {
     return nil;
 }
 
-- (void)configureLinkCell:(UITableViewCell *)cell {
-    if (self.editing) {
-        cell.accessoryType = UITableViewCellAccessoryNone;
-        cell.textLabel.textColor = self.textColorInactive;
-    } else {
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        cell.textLabel.textColor = self.textColorButton;
-    }
-}
-
-- (void)configureDeviceCell:(UITableViewCell *)cell {
-    cell.textLabel.text = self.usbDevice ? @"Nintendo Switch Connected" : @"No Connection";
-    cell.detailTextLabel.text = self.usbStatus ?: @"Ready for APX USB device...";
-}
-
-- (NSString *)footerForDeviceCell {
-    if (self.usbError) {
-        return self.usbError;
-    } else {
-        return @"Connect your Nintendo Switch in RCM mode via a Lightning OTG adapter. An unsupported \"APX\" device warning from iOS can safely be ignored.";
-    }
-}
-
-- (void)updateDeviceStatus:(NSString *)status {
-    self.usbStatus = status;
-    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:TableSectionDevice];
-    [self.tableView beginUpdates];
-    [self configureDeviceCell:[self.tableView cellForRowAtIndexPath:indexPath]];
-    [self.tableView footerViewForSection:TableSectionDevice].textLabel.text = [self footerForDeviceCell];
-    [self.tableView endUpdates];
-}
-
-- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
-    return indexPath.section == TableSectionPayloads;
-}
-
-- (BOOL)tableView:(UITableView *)tableView canMoveRowAtIndexPath:(NSIndexPath *)indexPath {
-    return indexPath.section == TableSectionPayloads && indexPath.row != self.payloads.count;
-}
-
-- (NSIndexPath *)tableView:(UITableView *)tableView targetIndexPathForMoveFromRowAtIndexPath:(NSIndexPath *)sourceIndexPath toProposedIndexPath:(NSIndexPath *)destIndexPath {
-    if (sourceIndexPath.section > destIndexPath.section) {
-        return [NSIndexPath indexPathForRow:0 inSection:sourceIndexPath.section];
-    } else if (sourceIndexPath.section < destIndexPath.section || destIndexPath.row >= self.payloads.count) {
-        return [NSIndexPath indexPathForRow:(self.payloads.count - 1) inSection:sourceIndexPath.section];
-    } else {
-        return destIndexPath;
-    }
-}
-
-- (void)tableView:(UITableView *)tableView moveRowAtIndexPath:(NSIndexPath *)sourceIndexPath toIndexPath:(NSIndexPath *)destinationIndexPath {
-    Payload *payload = self.payloads[sourceIndexPath.row];
-    [self.payloads removeObjectAtIndex:sourceIndexPath.row];
-    [self.payloads insertObject:payload atIndex:destinationIndexPath.row];
-    [self.payloadStorage storePayloadSortOrder:self.payloads];
-}
-
-- (UITableViewCellEditingStyle)tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (!self.editing) {
-        return UITableViewCellEditingStyleNone;
-    }
-    if (indexPath.section != TableSectionPayloads) {
-        return UITableViewCellEditingStyleNone;
-    } else if (indexPath.row == self.payloads.count) {
-        return UITableViewCellEditingStyleInsert;
-    } else {
-        return UITableViewCellEditingStyleDelete;
-    }
-}
-
-- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
-    assert(indexPath.section == TableSectionPayloads);
-    if (editingStyle == UITableViewCellEditingStyleInsert) {
-        [self addPayloadFromFile];
-        return;
-    }
-
-    assert(editingStyle == UITableViewCellEditingStyleDelete);
-    Payload *payload = self.payloads[indexPath.row];
-    NSError *error = nil;
-    if ([self.payloadStorage deletePayload:payload error:&error]) {
-        [self.payloads removeObjectAtIndex:indexPath.row];
-        [self.payloadStorage storePayloadSortOrder:self.payloads];
-        [self.tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
-    } else {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Deletion Failed"
-                                                                       message:error.localizedDescription
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Dismiss" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
-    }
-}
-
-- (NSIndexPath *)tableView:(UITableView *)tableView willSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (self.isEditing && indexPath.section != TableSectionPayloads) {
-        return nil;
-    } else if (indexPath.section == TableSectionDevice) {
-        return nil;
-    } else if (indexPath.section == TableSectionPayloads && !self.exploitReady) {
-        return nil;
-    } else {
-        return indexPath;
-    }
-}
-
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [self.tableView deselectRowAtIndexPath:indexPath animated:YES];
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (!self.entitlementsPatched) return;
     switch (indexPath.section) {
-        case TableSectionKernel:
-            if (indexPath.row == 0 && !self.hasOffsets && !self.downloadingOffsets) {
-                [self downloadOffsets];
-            } else if (indexPath.row == 1 && self.hasOffsets && !self.exploitRunning && !self.exploitReady) {
-                [self runExploit];
-            }
-            break;
-        case TableSectionLinks:
-            switch (indexPath.row) {
-                case 0:
-                    [self performSegueWithIdentifier:@"GettingStarted" sender:self];
-                    break;
-                case 1:
-                    [self performSegueWithIdentifier:@"About" sender:self];
-                    break;
-            }
-            break;
-        case TableSectionPayloads:
-            if (indexPath.row == self.payloads.count) {
+        case 1: {
+            if (self.payloads.count == 0) {
                 [self addPayloadFromFile];
             } else {
                 Payload *payload = self.payloads[indexPath.row];
-                if (self.isEditing) {
-                    [self renamePayload:payload];
-                } else if ([self.selectedPayload isEqual:payload]) {
+                if ([self.selectedPayload isEqual:payload]) {
                     self.selectedPayload = nil;
                     Settings.lastPayloadFileName = nil;
                     [self.tableView cellForRowAtIndexPath:indexPath].accessoryType = UITableViewCellAccessoryNone;
                 } else {
                     if (self.selectedPayload) {
-                        [self cellForPayload:self.selectedPayload].accessoryType = UITableViewCellAccessoryNone;
+                        NSIndexPath *prevIdx = [NSIndexPath indexPathForRow:(NSInteger)[self.payloads indexOfObject:self.selectedPayload] inSection:1];
+                        [[self.tableView cellForRowAtIndexPath:prevIdx] setAccessoryType:UITableViewCellAccessoryNone];
                     }
                     [self.tableView cellForRowAtIndexPath:indexPath].accessoryType = UITableViewCellAccessoryCheckmark;
                     self.selectedPayload = payload;
@@ -613,54 +533,9 @@ typedef NS_ENUM(NSInteger, TableSection) {
                 }
             }
             break;
+        }
     }
 }
-
-- (nullable UITableViewCell *)cellForPayload:(Payload *)payload {
-    NSUInteger index = [self.payloads indexOfObject:payload];
-    if (index != NSNotFound) {
-        NSIndexPath *indexPath = [NSIndexPath indexPathForRow:(NSInteger)index inSection:TableSectionPayloads];
-        return [self.tableView cellForRowAtIndexPath:indexPath];
-    } else {
-        return nil;
-    }
-}
-
-- (void)renamePayload:(Payload *)payload {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename Payload"
-                                                                   message:@"Enter a new name for this payload."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.text = payload.displayName;
-        textField.placeholder = @"payload name";
-        textField.clearButtonMode = UITextFieldViewModeAlways;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *newName = alert.textFields[0].text;
-        if (newName.length == 0 || [newName containsString:@":"] || [newName containsString:@"/"]) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename Failed"
-                                                                           message:@"Please enter a valid file name without the characters ':' or '/'."
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"Dismiss" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:alert animated:YES completion:nil];
-            return;
-        }
-        NSError *error = nil;
-        if ([self.payloadStorage renamePayload:payload withNewName:newName error:&error]) {
-            [self cellForPayload:payload].textLabel.text = newName;
-        } else {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Rename Failed"
-                                                                           message:error.localizedDescription
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"Dismiss" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:alert animated:YES completion:nil];
-        }
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-#pragma mark - Document Picker
 
 - (void)addPayloadFromFile {
     NSArray *docTypes = @[@"public.item", @"public.data"];
@@ -668,104 +543,72 @@ typedef NS_ENUM(NSInteger, TableSection) {
         UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:docTypes inMode:UIDocumentPickerModeImport];
         picker.delegate = self;
         [self presentViewController:picker animated:YES completion:nil];
-    }
-    @catch (NSException *exception) {
-        NSString *message;
-        if ([exception.name isEqualToString:NSInternalInconsistencyException]) {
-            message = @"iOS 10 cannot show a file picker when NXBoot is installed from an IPA file. Please import using the iCloud Drive app or SSH. Alternatively reinstall from a classic DEB archive.";
-        } else {
-            message = exception.reason;
-        }
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Error" message:message preferredStyle:UIAlertControllerStyleAlert];
+    } @catch (NSException *exception) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Error" message:exception.reason preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"Dismiss" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
     }
 }
 
+@end
+
+@implementation SwitchViewController (UIDocumentPickerDelegate)
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url {
     NSError *error = nil;
     Payload *payload = [self.payloadStorage importPayload:url.path move:YES error:&error];
     if (payload) {
-        [self.tableView beginUpdates];
         [self.payloads addObject:payload];
         [self.payloadStorage storePayloadSortOrder:self.payloads];
-        if (self.payloads.count == 1 && !self.editing) {
-            NSIndexPath *addButtonPath = [NSIndexPath indexPathForRow:0 inSection:TableSectionPayloads];
-            [self.tableView deleteRowsAtIndexPaths:@[addButtonPath] withRowAnimation:UITableViewRowAnimationAutomatic];
-            NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:TableSectionPayloads];
-            [self.tableView insertRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
-        } else {
-            NSIndexPath *indexPath = [NSIndexPath indexPathForRow:(self.payloads.count - 1) inSection:TableSectionPayloads];
-            [self.tableView insertRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
-        }
-        [self.tableView endUpdates];
+        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationAutomatic];
     } else {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Failed"
-                                                                       message:error.localizedDescription
-                                                                preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import Failed" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"Dismiss" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
     }
 }
+@end
 
-#pragma mark - Navigation
-
-- (UIBarButtonItem *)settingsButtonItem {
-    if (@available(iOS 13, *)) {
-        return [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"]
-                                                style:UIBarButtonItemStylePlain
-                                               target:self
-                                               action:@selector(settingsButtonTapped:)];
-    } else {
-        return [[UIBarButtonItem alloc] initWithTitle:@"Settings"
-                                                style:UIBarButtonItemStylePlain
-                                               target:self
-                                               action:@selector(settingsButtonTapped:)];
-    }
-}
-
-- (void)settingsButtonTapped:(id)sender {
-    [self performSegueWithIdentifier:@"Settings" sender:self];
-}
-
-- (IBAction)settingsUnwindAction:(UIStoryboardSegue *)unwindSegue {
-    [self restoreRememberedPayload];
-}
-
-- (void)prepareForSegue:(UIStoryboardSegue *)segue sender:(id)sender {
-    if (self.selectedPayload) {
-        [self cellForPayload:self.selectedPayload].accessoryType = UITableViewCellAccessoryNone;
-        self.selectedPayload = nil;
-    }
-    segue.destinationViewController.presentationController.delegate = self;
-}
-
-- (void)presentationControllerDidDismiss:(UIPresentationController *)presentationController {
-    [self restoreRememberedPayload];
-}
-
-#pragma mark - NXUSBDeviceEnumeratorDelegate
-
+@implementation SwitchViewController (NXUSBDeviceEnumeratorDelegate)
 - (void)usbDeviceEnumerator:(NXUSBDeviceEnumerator *)deviceEnum deviceConnected:(NXUSBDevice *)device {
     self.usbDevice = device;
-    if (self.exploitReady) {
-        if (self.selectedPayload) {
-            [self updateDeviceStatus:@"Connected, booting payload..."];
-            [self bootPayload:self.selectedPayload];
-        } else {
-            [self updateDeviceStatus:@"No payload activated yet"];
-        }
+    if (self.selectedPayload) {
+        [self updateDeviceStatus:@"Connected, booting payload..."];
+        [self bootPayload:self.selectedPayload];
+    } else {
+        [self updateDeviceStatus:@"No payload activated yet"];
     }
 }
-
 - (void)usbDeviceEnumerator:(NXUSBDeviceEnumerator *)deviceEnum deviceDisconnected:(NXUSBDevice *)device {
     self.usbDevice = nil;
     [self updateDeviceStatus:@"Disconnected"];
 }
-
 - (void)usbDeviceEnumerator:(NXUSBDeviceEnumerator *)deviceEnum deviceError:(NSString *)err {
     self.usbError = err;
     [self updateDeviceStatus:@"USB device error"];
+}
+@end
+
+#pragma mark - Main TabBarController
+
+@implementation MainViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+
+    ExploitViewController *exploitVC = [[ExploitViewController alloc] initWithStyle:UITableViewStyleGrouped];
+    UINavigationController *exploitNav = [[UINavigationController alloc] initWithRootViewController:exploitVC];
+
+    SwitchViewController *switchVC = [[SwitchViewController alloc] initWithStyle:UITableViewStyleGrouped];
+    UINavigationController *switchNav = [[UINavigationController alloc] initWithRootViewController:switchVC];
+
+    self.viewControllers = @[exploitNav, switchNav];
+
+    if (@available(iOS 13, *)) {
+        exploitVC.tabBarItem.image = [UIImage systemImageNamed:@"bolt.fill"];
+        switchVC.tabBarItem.image = [UIImage systemImageNamed:@"gamecontroller.fill"];
+    }
+    exploitVC.tabBarItem.title = @"Exploit";
+    switchVC.tabBarItem.title = @"Switch";
 }
 
 @end

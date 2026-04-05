@@ -16,6 +16,8 @@ static NSString *const kkernprockey   = @"lara.kernprocoff";
 static NSString *const krootvnodekey  = @"lara.rootvnodeoff";
 static NSString *const kkerncachekey  = @"lara.kernelcache_path";
 static NSString *const kkernprocsize  = @"lara.kernproc_size";
+static NSString *const kcsflagsoffkey = @"lara.csflags_offset";
+static NSString *const kucredoffkey   = @"lara.ucred_offset";
 
 static NSString *kerncachepath(void) {
     NSString *docs =
@@ -49,6 +51,10 @@ static bool resolvekernoffsets(NSString *kcpath) {
     uint64_t rootvnode = xpf_item_resolve("kernelSymbol.rootvnode");
     uint64_t procsize  = xpf_item_resolve("kernelStruct.proc.struct_size");
 
+    // Resolve p_ucred and p_csflags offsets by scanning the proc struct definition
+    uint64_t ucred_off  = xpf_item_resolve("kernelStruct.proc.p_ucred");
+    uint64_t csflags_off = xpf_item_resolve("kernelStruct.proc.p_csflags");
+
     if (!kernproc || !rootvnode) {
         printf("failed to resolve important kernel symbols\n");
         xpf_stop();
@@ -67,6 +73,8 @@ static bool resolvekernoffsets(NSString *kcpath) {
     printf("kernproc: 0x%llx\n", kernprocoff);
     printf("rootvnode: 0x%llx\n", rootvnodeoff);
     printf("procsize: 0x%llx\n", procsize);
+    printf("ucred_off: 0x%llx\n", ucred_off);
+    printf("csflags_off: 0x%llx\n", csflags_off);
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
@@ -74,6 +82,8 @@ static bool resolvekernoffsets(NSString *kcpath) {
     [defaults setObject:@(rootvnodeoff) forKey:krootvnodekey];
     [defaults setObject:@(procsize) forKey:kkernprocsize];
     [defaults setObject:kcpath forKey:kkerncachekey];
+    if (ucred_off)  [defaults setObject:@(ucred_off) forKey:kucredoffkey];
+    if (csflags_off) [defaults setObject:@(csflags_off) forKey:kcsflagsoffkey];
 
     [defaults synchronize];
 
@@ -145,5 +155,17 @@ void clearkerncachedata(void) {
     [defaults removeObjectForKey:kkernprockey];
     [defaults removeObjectForKey:krootvnodekey];
     [defaults removeObjectForKey:kkernprocsize];
+    [defaults removeObjectForKey:kcsflagsoffkey];
+    [defaults removeObjectForKey:kucredoffkey];
     [defaults synchronize];
+}
+
+uint64_t getcsflagsoffset(void) {
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:kcsflagsoffkey];
+    return n ? n.unsignedLongLongValue : 0;
+}
+
+uint64_t getucredooffset(void) {
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:kucredoffkey];
+    return n ? n.unsignedLongLongValue : 0;
 }

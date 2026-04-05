@@ -340,8 +340,6 @@ int killproc(const char* name) {
 #define CS_GET_TASK_ALLOW  0x00000004
 #define CS_INSTALLER       0x00000008
 
-static const uint32_t PROC_CSFLAGS_OFFSET = 0x3e0;
-static const uint32_t PROC_Ucred_OFFSET   = 0xd8;
 static const uint32_t UCRED_CR_UID_OFFSET = 0x18;
 
 int patchcsflags(void) {
@@ -351,17 +349,27 @@ int patchcsflags(void) {
         return -1;
     }
 
-    uint64_t ucred = ds_kread64(self + PROC_Ucred_OFFSET);
-    if (ucred) {
-        ds_kwrite32(ucred + UCRED_CR_UID_OFFSET, 0);
-        printf("patched uid to 0\n");
+    uint64_t csflags_off = getcsflagsoffset();
+    uint64_t ucred_off   = getucredooffset();
+
+    if (!csflags_off) {
+        printf("patchcsflags: csflags offset not resolved — cannot patch\n");
+        return -1;
     }
 
-    uint32_t oldflags = ds_kread32(self + PROC_CSFLAGS_OFFSET);
-    uint32_t newflags = oldflags | CS_PLATFORM_BINARY | CS_DEBUGGED | CS_GET_TASK_ALLOW | CS_INSTALLER;
-    ds_kwrite32(self + PROC_CSFLAGS_OFFSET, newflags);
+    if (ucred_off) {
+        uint64_t ucred = ds_kread64(self + ucred_off);
+        if (ucred) {
+            ds_kwrite32(ucred + UCRED_CR_UID_OFFSET, 0);
+            printf("patched uid to 0\n");
+        }
+    }
 
-    uint32_t verify = ds_kread32(self + PROC_CSFLAGS_OFFSET);
+    uint32_t oldflags = ds_kread32(self + csflags_off);
+    uint32_t newflags = oldflags | CS_PLATFORM_BINARY | CS_DEBUGGED | CS_GET_TASK_ALLOW | CS_INSTALLER;
+    ds_kwrite32(self + csflags_off, newflags);
+
+    uint32_t verify = ds_kread32(self + csflags_off);
     printf("csflags: 0x%x -> 0x%x (verified: 0x%x)\n", oldflags, newflags, verify);
 
     if (verify != newflags) {
