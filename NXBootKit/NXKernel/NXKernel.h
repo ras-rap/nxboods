@@ -55,7 +55,7 @@ void NXKernelClearOffsets(void);
 void NXKernelInitOffsets(void);
 uint64_t NXKernelProcByPID(pid_t pid);
 uint64_t NXKernelProcByName(const char *name);
-int NXKernelPatchCSFlags(void);
+int NXKernelSandboxEscape(void);
 
 // Support check (implemented in Swift/ObjC)
 bool NXKernelIsSupported(void);

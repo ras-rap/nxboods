@@ -180,7 +180,7 @@
     self.patchingEntitlements = YES;
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        int result = NXKernelPatchCSFlags();
+        int result = NXKernelSandboxEscape();
         dispatch_async(dispatch_get_main_queue(), ^{
             self.patchingEntitlements = NO;
             self.entitlementsPatched = (result == 0);
@@ -188,8 +188,8 @@
             if (self.entitlementsPatched) {
                 [self.usbEnum start];
             } else {
-                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Patch Failed"
-                                                                             message:@"Could not patch code signing flags. USB access may not work."
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Escape Failed"
+                                                                             message:@"Could not escape sandbox. USB access may not work."
                                                                       preferredStyle:UIAlertControllerStyleAlert];
                 [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:alert animated:YES completion:nil];
@@ -304,7 +304,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
     switch (section) {
         case TableSectionOffsets: return @"Step 1 — Kernelcache";
         case TableSectionExploit: return @"Step 2 — Exploit";
-        case TableSectionEntitlements: return @"Step 3 — Entitlements";
+        case TableSectionEntitlements: return @"Step 3 — Sandbox Escape";
         case TableSectionDevice: return @"Nintendo Switch";
         case TableSectionPayloads: return @"Payloads";
         case TableSectionLog: return @"Log";
@@ -316,7 +316,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
     switch (section) {
         case TableSectionOffsets: return @"Download and resolve kernel offsets. One-time operation.";
         case TableSectionExploit: return @"Run the Darksword IOSurface/ICMPv6 exploit to gain kernel read/write.";
-        case TableSectionEntitlements: return @"Patch code signing flags to grant unrestricted IOKit access (required for USB).";
+        case TableSectionEntitlements: return @"Patch sandbox extensions to grant unrestricted IOKit access (required for USB).";
         case TableSectionDevice: return [self footerForDeviceCell];
         case TableSectionPayloads:
             if (self.isEditing) return @"Tap a payload to change its name.";
@@ -373,19 +373,19 @@ typedef NS_ENUM(NSInteger, TableSection) {
         case TableSectionEntitlements: {
             UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
             if (self.entitlementsPatched) {
-                cell.textLabel.text = @"Entitlements patched";
+                cell.textLabel.text = @"Sandbox escaped";
                 cell.textLabel.textColor = [UIColor systemGreenColor];
                 cell.accessoryType = UITableViewCellAccessoryCheckmark;
             } else if (self.patchingEntitlements) {
-                cell.textLabel.text = @"Patching csflags...";
+                cell.textLabel.text = @"Escaping sandbox...";
                 cell.textLabel.textColor = [UIColor systemOrangeColor];
                 cell.accessoryType = UITableViewCellAccessoryNone;
             } else if (!self.exploitReady) {
-                cell.textLabel.text = @"Patch Entitlements";
+                cell.textLabel.text = @"Escape Sandbox";
                 cell.textLabel.textColor = self.textColorInactive;
                 cell.accessoryType = UITableViewCellAccessoryNone;
             } else {
-                cell.textLabel.text = @"Patch Entitlements";
+                cell.textLabel.text = @"Escape Sandbox";
                 cell.textLabel.textColor = self.textColorButton;
                 cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             }

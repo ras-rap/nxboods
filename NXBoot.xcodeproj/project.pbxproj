@@ -20,6 +20,8 @@
 		NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000B /* libgrabkernel2.dylib */; };
 		NXK000000000000000000000E /* libxpf.dylib in Embed Dylibs */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000A /* libxpf.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		NXK000000000000000000000F /* libgrabkernel2.dylib in Embed Dylibs */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000B /* libgrabkernel2.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		NXK0000000000000000000010 /* sbx.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK3000000000000000000010 /* sbx.h */; };
+		NXK0000000000000000000011 /* sbx.m in Sources */ = {isa = PBXBuildFile; fileRef = NXK3000000000000000000011 /* sbx.m */; };
 		NXK000000000000000000000C /* xpf.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000C /* xpf.h */; };
 		NXK000000000000000000000D /* libgrabkernel2.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000D /* libgrabkernel2.h */; };
 		NXK000000000000000000000E /* arm64.h in Headers */ = {isa = PBXBuildFile; fileRef = NXK100000000000000000000E /* arm64.h */; };
@@ -135,6 +137,8 @@
 		NXK100000000000000000000B /* libgrabkernel2.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libgrabkernel2.dylib; sourceTree = "<group>"; };
 		NXK100000000000000000000C /* xpf.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = xpf.h; sourceTree = "<group>"; };
 		NXK100000000000000000000D /* libgrabkernel2.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = libgrabkernel2.h; sourceTree = "<group>"; };
+		NXK3000000000000000000010 /* sbx.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sbx.h; sourceTree = "<group>"; };
+		NXK3000000000000000000011 /* sbx.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = sbx.m; sourceTree = "<group>"; };
 		NXK100000000000000000000E /* arm64.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = arm64.h; sourceTree = "<group>"; };
 		NXK100000000000000000000F /* Base64.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Base64.h; sourceTree = "<group>"; };
 		NXK1000000000000000000010 /* BufferedStream.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BufferedStream.h; sourceTree = "<group>"; };
@@ -282,6 +286,8 @@
 				NXK1000000000000000000007 /* utils.m */,
 				NXK1000000000000000000008 /* offsets.h */,
 				NXK1000000000000000000009 /* offsets.m */,
+				NXK3000000000000000000010 /* sbx.h */,
+				NXK3000000000000000000011 /* sbx.m */,
 				NXK2000000000000000000002 /* headers */,
 				NXK2000000000000000000003 /* choma */,
 				NXK2000000000000000000004 /* lib */,
@@ -604,6 +610,7 @@
 				NXK0000000000000000000005 /* darksword.m in Sources */,
 				NXK0000000000000000000007 /* utils.m in Sources */,
 				NXK0000000000000000000009 /* offsets.m in Sources */,
+				NXK0000000000000000000011 /* sbx.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -644,6 +651,7 @@
 				NXK0000000000000000000005 /* darksword.m in Sources */,
 				NXK0000000000000000000007 /* utils.m in Sources */,
 				NXK0000000000000000000009 /* offsets.m in Sources */,
+				NXK0000000000000000000011 /* sbx.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

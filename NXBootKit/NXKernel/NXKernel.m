@@ -9,6 +9,7 @@
 #import "darksword.h"
 #import "utils.h"
 #import "offsets.h"
+#import "sbx.h"
 
 static NXKernelLogCallback g_nx_log_callback = NULL;
 static NXKernelProgressCallback g_nx_progress_callback = NULL;
@@ -108,8 +109,8 @@ uint64_t NXKernelProcByName(const char *name) {
     return procbyname(name);
 }
 
-int NXKernelPatchCSFlags(void) {
-    return patchcsflags();
+int NXKernelSandboxEscape(void) {
+    return sbx_escape(ds_get_our_proc());
 }
 
 bool NXKernelIsSupported(void) {

