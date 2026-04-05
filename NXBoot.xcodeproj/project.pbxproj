@@ -103,16 +103,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 		};
-		A7CD57CD2556F591006AA85B /* Embed Frameworks */ = {
+		A7CD57CD2556F591006AA85B /* Embed Dylibs */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
+			dstPath = "Frameworks/";
+			dstSubfolderSpec = 1;
 			files = (
 				NXK000000000000000000000A /* libxpf.dylib in Frameworks */,
 				NXK000000000000000000000B /* libgrabkernel2.dylib in Frameworks */,
 			);
-			name = "Embed Frameworks";
+			name = "Embed Dylibs";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */

@@ -23,19 +23,9 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Install dependencies
-        run: |
-          brew install ldid
-
-      - name: Build IPA
+      - name: Build
         run: |
           set -euo pipefail
-
-          version=$(xcodebuild -project NXBoot.xcodeproj -scheme NXBoot -showBuildSettings 2>/dev/null | grep MARKETING_VERSION | head -1 | awk -F' = ' '{print $2}')
-          buildno=$(xcodebuild -project NXBoot.xcodeproj -scheme NXBoot -showBuildSettings 2>/dev/null | grep CURRENT_PROJECT_VERSION | head -1 | awk -F' = ' '{print $2}')
-          bundleid="com.mologie.NXBoot"
-
-          echo "Version: $version Build: $buildno"
 
           DERIVED_DATA="$PWD/build/DerivedData"
 
@@ -59,22 +49,27 @@ jobs:
 
           releasedir="$DERIVED_DATA/Build/Products/Release-iphoneos"
 
-          # Fail fast with a clear error if paths are wrong
-          test -f "NXBoot/NXBootJailbreak.entitlements"
+          # Verify build output
           test -f "$releasedir/NXBoot.app/NXBoot"
-
-          # Sign the binary
-          ldid -I"$bundleid" -Cadhoc -SNXBoot/NXBootJailbreak.entitlements "$releasedir/NXBoot.app/NXBoot"
+          echo "Build successful"
+          ls -la "$releasedir/NXBoot.app/"
+          if [ -d "$releasedir/NXBoot.app/Frameworks" ]; then
+            echo "Embedded dylibs:"
+            ls -la "$releasedir/NXBoot.app/Frameworks/"
+          fi
 
           # Remove provisioning profile if present
           rm -f "$releasedir/NXBoot.app/embedded.mobileprovision"
 
-          # Create IPA
+          # Create unsigned IPA
           mkdir -p DerivedData/ipa/Payload
           ditto "$releasedir/NXBoot.app" DerivedData/ipa/Payload/NXBoot.app
 
+          version=$(xcodebuild -project NXBoot.xcodeproj -scheme NXBoot -showBuildSettings 2>/dev/null | grep MARKETING_VERSION | head -1 | awk -F' = ' '{print $2}')
+          buildno=$(xcodebuild -project NXBoot.xcodeproj -scheme NXBoot -showBuildSettings 2>/dev/null | grep CURRENT_PROJECT_VERSION | head -1 | awk -F' = ' '{print $2}')
+
           mkdir -p dist
-          tipa="dist/NXBoot_${version}-${buildno}.tipa"
+          tipa="dist/NXBoot_${version}-${buildno}-unsigned.tipa"
           rm -f "$tipa"
           (cd DerivedData/ipa && COPYFILE_DISABLE=1 zip -r "../../$tipa" "Payload" -x "._*" -x ".DS_Store" -x "__MACOSX")
 
@@ -83,7 +78,7 @@ jobs:
             ditto "$releasedir/NXBoot.app.dSYM" "dist/NXBoot_${version}-${buildno}.app.dSYM"
           fi
 
-          echo "IPA built: $tipa"
+          echo "Unsigned IPA built: $tipa"
           ls -la dist/
 
       - name: Upload IPA artifact
