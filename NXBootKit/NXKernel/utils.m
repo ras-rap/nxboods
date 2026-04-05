@@ -359,10 +359,6 @@ static bool is_valid_csflags(uint32_t v) {
     return false;
 }
 
-static bool is_kptr(uint64_t v) {
-    return (v & 0xfffffff000000000ULL) == 0xfffffff000000000ULL;
-}
-
 static uint32_t find_csflags_offset(uint64_t proc) {
     uint64_t procsize = PROC_STRUCT_SIZE;
     for (uint32_t off = 0x100; off < procsize - 4; off += 4) {
