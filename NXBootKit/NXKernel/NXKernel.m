@@ -116,14 +116,16 @@ int NXKernelSandboxEscape(void) {
         selfProc = ourproc();
     }
 
+    nx_internal_log("kernel: running sbx_escape");
     int sbxResult = sbx_escape(selfProc);
-    if (sbxResult == 0) {
-        return 0;
+    if (sbxResult != 0) {
+        nx_internal_log("kernel: sbx_escape failed, continuing to patchcsflags");
     }
 
+    nx_internal_log("kernel: running patchcsflags");
     int patchResult = patchcsflags();
-    if (patchResult == 0) {
-        return 0;
+    if (patchResult != 0) {
+        nx_internal_log("kernel: patchcsflags failed");
     }
 
     return patchResult;

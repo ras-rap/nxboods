@@ -21,6 +21,7 @@ extern const mach_port_t kIOMasterPortDefault __API_AVAILABLE(ios(1.0));
 
 @interface NXUSBDeviceEnumerator () {
     io_iterator_t _deviceIter;
+    io_iterator_t _legacyDeviceIter;
 }
 @property (assign, nonatomic) UInt16 VID;
 @property (assign, nonatomic) UInt16 PID;
@@ -51,6 +52,31 @@ static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
     return *uuidPtr;
 }
 
+static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
+                                                          const CFUUIDRef preferredUserClient,
+                                                          const CFUUIDRef fallbackUserClient,
+                                                          IOCFPlugInInterface ***plugInInterface,
+                                                          SInt32 *plugInScore,
+                                                          NSString *logPrefix)
+{
+    kern_return_t kr = IOCreatePlugInInterfaceForService(service,
+                                                         preferredUserClient,
+                                                         kIOCFPlugInInterfaceID,
+                                                         plugInInterface,
+                                                         plugInScore);
+
+    if ((kr || !*plugInInterface) && preferredUserClient != fallbackUserClient) {
+        NXLog(@"%@: preferred user client plugin failed (%08x), retrying fallback", logPrefix, kr);
+        kr = IOCreatePlugInInterfaceForService(service,
+                                               fallbackUserClient,
+                                               kIOCFPlugInInterfaceID,
+                                               plugInInterface,
+                                               plugInScore);
+    }
+
+    return kr;
+}
+
 @implementation NXUSBDeviceEnumerator
 
 - (void)dealloc {
@@ -65,6 +91,7 @@ static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
 - (void)start {
     kern_return_t kr;
     NSMutableDictionary *matchingDict = nil;
+    NSMutableDictionary *legacyMatchingDict = nil;
 
     // clean up previous run before starting a new one
     [self stop];
@@ -100,10 +127,30 @@ static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
         return;
     }
 
+    // Some firmware stacks still expose IOUSBDevice, so monitor both classes.
+    legacyMatchingDict = (__bridge_transfer NSMutableDictionary *)IOServiceMatching("IOUSBDevice");
+    if (legacyMatchingDict) {
+        [legacyMatchingDict setValue:@(self.VID) forKey:@(kUSBVendorID)];
+        [legacyMatchingDict setValue:@(self.PID) forKey:@(kUSBProductID)];
+
+        kr = IOServiceAddMatchingNotification(self.notifyPort,
+                                              kIOFirstMatchNotification,
+                                              (__bridge_retained CFDictionaryRef)legacyMatchingDict,
+                                              bridgeDevicesAdded,
+                                              (__bridge void *)self,
+                                              &_legacyDeviceIter);
+        if (kr) {
+            NXLog(@"USB: Legacy IOUSBDevice match registration failed (%08x)", kr);
+        }
+    }
+
     NXLog(@"USB: OK, listening for devices matching VID:%04x PID:%04x", self.VID, self.PID);
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [self handleDevicesAdded:self->_deviceIter];
+        if (self->_legacyDeviceIter) {
+            [self handleDevicesAdded:self->_legacyDeviceIter];
+        }
         NXLog(@"USB: Done processing initial device list");
     });
 }
@@ -115,6 +162,10 @@ static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
     if (_deviceIter) {
         IOObjectRelease(_deviceIter);
         _deviceIter = 0;
+    }
+    if (_legacyDeviceIter) {
+        IOObjectRelease(_legacyDeviceIter);
+        _legacyDeviceIter = 0;
     }
 }
 
@@ -153,19 +204,25 @@ static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
             ? hostUserClientTypeID
             : kIOUSBDeviceUserClientTypeID;
 
-        kr = IOCreatePlugInInterfaceForService(service,
-                                               preferredUserClient,
-                                               kIOCFPlugInInterfaceID,
-                                               &plugInInterface,
-                                               &plugInScore);
+        kr = NXCreatePluginForServiceWithFallback(service,
+                                                  preferredUserClient,
+                                                  kIOUSBDeviceUserClientTypeID,
+                                                  &plugInInterface,
+                                                  &plugInScore,
+                                                  @"USB: current service");
 
-        if ((kr || !plugInInterface) && preferredUserClient != kIOUSBDeviceUserClientTypeID) {
-            NXLog(@"USB: host user client plugin failed (%08x), retrying legacy user client", kr);
-            kr = IOCreatePlugInInterfaceForService(service,
-                                                   kIOUSBDeviceUserClientTypeID,
-                                                   kIOCFPlugInInterfaceID,
-                                                   &plugInInterface,
-                                                   &plugInScore);
+        // On newer iOS stacks, the usable user client may be exposed on a related registry node.
+        if (kr || !plugInInterface) {
+            io_registry_entry_t parent = IO_OBJECT_NULL;
+            if (IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent) == KERN_SUCCESS) {
+                kr = NXCreatePluginForServiceWithFallback(parent,
+                                                          preferredUserClient,
+                                                          kIOUSBDeviceUserClientTypeID,
+                                                          &plugInInterface,
+                                                          &plugInScore,
+                                                          @"USB: parent service");
+                IOObjectRelease(parent);
+            }
         }
 
         if (kr || !plugInInterface) {
