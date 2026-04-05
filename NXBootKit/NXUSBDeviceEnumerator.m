@@ -69,6 +69,19 @@ static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
     return *uuidPtr;
 }
 
+static CFUUIDRef NXLookupHostUUIDSymbolAny(const char * const *symbolNames, size_t symbolCount, NSString *logPrefix) {
+    for (size_t i = 0; i < symbolCount; i++) {
+        CFUUIDRef uuid = NXLookupHostUUIDSymbol(symbolNames[i]);
+        if (uuid) {
+            NXLog(@"%@: resolved %s", logPrefix, symbolNames[i]);
+            return uuid;
+        }
+    }
+
+    NXLog(@"%@: no matching host UUID symbol found", logPrefix);
+    return NULL;
+}
+
 static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
                                                           const CFUUIDRef preferredUserClient,
                                                           const CFUUIDRef fallbackUserClient,
@@ -215,8 +228,20 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
         (void)IOObjectGetClass(service, ioClassName);
 
         BOOL classIsHostDevice = (strcmp(ioClassName, "IOUSBHostDevice") == 0);
-        CFUUIDRef hostUserClientTypeID = NXLookupHostUUIDSymbol("kIOUSBHostDeviceUserClientTypeID");
-        CFUUIDRef hostInterfaceID = NXLookupHostUUIDSymbol("kIOUSBHostDeviceInterfaceID");
+        static const char * const hostUserClientNames[] = {
+            "kIOUSBHostDeviceUserClientTypeID",
+            "kIOUSBHostDeviceUserClientTypeID245",
+        };
+        static const char * const hostInterfaceNames[] = {
+            "kIOUSBHostDeviceInterfaceID",
+            "kIOUSBHostDeviceInterfaceID245",
+        };
+        CFUUIDRef hostUserClientTypeID = NXLookupHostUUIDSymbolAny(hostUserClientNames,
+                                                                   sizeof(hostUserClientNames) / sizeof(hostUserClientNames[0]),
+                                                                   @"USB: host user-client UUID");
+        CFUUIDRef hostInterfaceID = NXLookupHostUUIDSymbolAny(hostInterfaceNames,
+                                                              sizeof(hostInterfaceNames) / sizeof(hostInterfaceNames[0]),
+                                                              @"USB: host interface UUID");
         NXLog(@"USB: class=%s hostUserClient=%s hostInterface=%s",
               ioClassName,
               hostUserClientTypeID ? "yes" : "no",
