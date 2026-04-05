@@ -44,8 +44,25 @@ static void bridgeDeviceNotification(void *u, io_service_t service, natural_t me
     [deviceEnum handleDeviceNotification:device forService:service messageType:messageType messageArg:messageArg];
 }
 
+static void *NXIOKitFrameworkHandle(void) {
+    static void *handle = NULL;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY | RTLD_GLOBAL);
+    });
+    return handle;
+}
+
 static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
-    const CFUUIDRef *uuidPtr = (const CFUUIDRef *)dlsym(RTLD_DEFAULT, symbolName);
+    const CFUUIDRef *uuidPtr = NULL;
+
+    void *handle = NXIOKitFrameworkHandle();
+    if (handle) {
+        uuidPtr = (const CFUUIDRef *)dlsym(handle, symbolName);
+    }
+    if (!uuidPtr) {
+        uuidPtr = (const CFUUIDRef *)dlsym(RTLD_DEFAULT, symbolName);
+    }
     if (!uuidPtr) {
         return NULL;
     }
@@ -192,7 +209,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
 
         // load the device interface implementation bundle
         IOCFPlugInInterface **plugInInterface = NULL;
-        SInt32 plugInScore;
+        SInt32 plugInScore = -1;
         io_name_t ioClassName;
         ioClassName[0] = '\0';
         (void)IOObjectGetClass(service, ioClassName);
@@ -200,9 +217,17 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
         BOOL classIsHostDevice = (strcmp(ioClassName, "IOUSBHostDevice") == 0);
         CFUUIDRef hostUserClientTypeID = NXLookupHostUUIDSymbol("kIOUSBHostDeviceUserClientTypeID");
         CFUUIDRef hostInterfaceID = NXLookupHostUUIDSymbol("kIOUSBHostDeviceInterfaceID");
+        NXLog(@"USB: class=%s hostUserClient=%s hostInterface=%s",
+              ioClassName,
+              hostUserClientTypeID ? "yes" : "no",
+              hostInterfaceID ? "yes" : "no");
         const CFUUIDRef preferredUserClient = (classIsHostDevice && hostUserClientTypeID)
             ? hostUserClientTypeID
             : kIOUSBDeviceUserClientTypeID;
+
+        if (classIsHostDevice && !hostUserClientTypeID) {
+            NXLog(@"USB: host device client UUID unavailable, legacy fallback may be unsupported");
+        }
 
         kr = NXCreatePluginForServiceWithFallback(service,
                                                   preferredUserClient,
