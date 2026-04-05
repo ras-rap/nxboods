@@ -147,8 +147,16 @@ void init_offsets(void) {
 static NSString *const kkernprocoffset = @"lara.kernprocoff";
 
 static bool is_kptr(uint64_t p) {
+    if (p == 0) return false;
     if ((p & 0x7ULL) != 0) return false;
-    return p >= 0xffffffe000000000ULL;
+
+    // Accept canonical high-half kernel pointers; iOS 26/A18 has valid pointers below 0xffffffe000000000.
+    uint64_t top16 = p & 0xFFFF000000000000ULL;
+    if (top16 == 0xFFFF000000000000ULL) return true;
+
+    // Also accept signed 56-bit canonicalized pointers.
+    uint64_t top8 = p & 0xFF00000000000000ULL;
+    return top8 == 0xFF00000000000000ULL;
 }
 
 static inline uint64_t xpaci(uint64_t a);
