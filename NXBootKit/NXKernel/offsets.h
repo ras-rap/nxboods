@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/types.h>
+#import <Foundation/Foundation.h>
+#import <Foundation/Foundation.h>
 
 #ifdef __cplusplus
 extern "C" {

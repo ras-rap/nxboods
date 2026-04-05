@@ -21,6 +21,7 @@ void init_offsets(void);
 uint64_t getprocsize(void);
 uint64_t ourproc(void);
 uint64_t taskbyproc(uint64_t procaddr);
+uint64_t procbypid(pid_t targetpid);
 uint64_t procbyname(const char *procname);
 
 extern bool aslrstate;
