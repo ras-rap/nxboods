@@ -186,7 +186,7 @@
 		A795B6B521015F880008820F /* nxboot */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = nxboot; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7999EC920F5761B00F659EB /* PackageIcon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = PackageIcon.png; sourceTree = "<group>"; };
 		A7C4EA1420EE2D1B0026FFC9 /* MainViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MainViewController.h; sourceTree = "<group>"; };
-		A7C4EA1520EE2D1B0026FFC9 /* MainViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = MainViewController.mm; sourceTree = "<group>"; };
+		A7C4EA1520EE2D1B0026FFC9 /* MainViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = MainViewController.m; sourceTree = "<group>"; };
 		A7CD57E62556FB8B006AA85B /* NXHekateCustomizer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NXHekateCustomizer.h; sourceTree = "<group>"; };
 		A7CD57E72556FB8B006AA85B /* NXHekateCustomizer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NXHekateCustomizer.m; sourceTree = "<group>"; };
 		A7F0A88E20F48492001C9D07 /* Model.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = Model.xcdatamodel; sourceTree = "<group>"; };
@@ -623,7 +623,7 @@
 				116765F92B42104000DF24B5 /* Settings.m in Sources */,
 				11C855112A2582E400DF24B5 /* NXUSBDevice.m in Sources */,
 				11C855132A2582E400DF24B5 /* NXUSBDeviceEnumerator.m in Sources */,
-				A7C4EA1620EE2D1B0026FFC9 /* MainViewController.mm in Sources */,
+				A7C4EA1620EE2D1B0026FFC9 /* MainViewController.m in Sources */,
 				A765643F20F4D265005EC7E6 /* PayloadStorage.m in Sources */,
 				11C855122A2582E400DF24B5 /* NXExec.m in Sources */,
 				11C855152A2582E400DF24B5 /* NXHekateCustomizer.m in Sources */,
@@ -633,6 +633,11 @@
 				A7FDBE1920EE27DD00E59587 /* AppDelegate.m in Sources */,
 				A7F0A88F20F48492001C9D07 /* Model.xcdatamodeld in Sources */,
 				1158D0002B3AF5CE00DF24B5 /* SettingsViewController.m in Sources */,
+				NXK0000000000000000000002 /* NXKernel.m in Sources */,
+				NXK0000000000000000000003 /* NXKernelSupport.m in Sources */,
+				NXK0000000000000000000005 /* darksword.m in Sources */,
+				NXK0000000000000000000007 /* utils.m in Sources */,
+				NXK0000000000000000000009 /* offsets.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
