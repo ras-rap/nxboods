@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #import <sys/types.h>
 #include <sys/sysctl.h>
+#include <sys/codesign.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -203,6 +204,29 @@ static uint64_t procsize_or_default(void) {
 }
 
 static uint32_t find_csflags_offset(uint64_t proc) {
+    uint32_t expectedCsflags = 0;
+    if (csops(getpid(), CS_OPS_STATUS, &expectedCsflags, sizeof(expectedCsflags)) == 0) {
+        for (uint32_t off = 0x100; off + 4 < procsize_or_default(); off += 4) {
+            uint32_t value = ds_kread32(proc + off);
+            if (value == expectedCsflags) {
+                return off;
+            }
+
+            uint32_t significant = (CS_VALID |
+                                    CS_ADHOC |
+                                    CS_GET_TASK_ALLOW |
+                                    CS_INSTALLER |
+                                    CS_HARD |
+                                    CS_KILL |
+                                    CS_DEBUGGED |
+                                    CS_PLATFORM_BINARY);
+            if ((value & significant) == (expectedCsflags & significant) &&
+                (value & CS_VALID)) {
+                return off;
+            }
+        }
+    }
+
     uint64_t procsize = procsize_or_default();
     uint64_t launchd = procbypid(1);
 
