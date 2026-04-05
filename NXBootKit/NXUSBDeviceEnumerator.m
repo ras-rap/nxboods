@@ -133,13 +133,16 @@ static void bridgeDeviceNotification(void *u, io_service_t service, natural_t me
         // load the device interface implementation bundle
         IOCFPlugInInterface **plugInInterface = NULL;
         SInt32 plugInScore;
+        io_name_t ioClassName;
+        ioClassName[0] = '\0';
+        (void)IOObjectGetClass(service, ioClassName);
         kr = IOCreatePlugInInterfaceForService(service,
                                                kIOUSBDeviceUserClientTypeID,
                                                kIOCFPlugInInterfaceID,
                                                &plugInInterface,
                                                &plugInScore);
         if (kr || !plugInInterface) {
-            ERR(@"Could not create USB device plugin instance (%08x)", kr);
+            ERR(@"Could not create USB device plugin instance (%08x) class=%s score=%d", kr, ioClassName, (int)plugInScore);
             goto cleanup;
         }
         kr = (*plugInInterface)->QueryInterface(plugInInterface,

