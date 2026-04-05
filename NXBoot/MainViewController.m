@@ -3,7 +3,6 @@
 #import "FLBootProfile+CoreDataClass.h"
 #import "NXExec.h"
 #import "NXUSBDeviceEnumerator.h"
-#import "NXKernel.h"
 #import "PayloadStorage.h"
 #import "Settings.h"
 
@@ -24,28 +23,9 @@
 @property (nonatomic, strong, nullable) NSString *usbStatus;
 @property (nonatomic, strong, nullable) NSString *usbError;
 
-// Kernel exploit state
-@property (nonatomic, assign) NXKernelStatus kernelStatus;
-@property (nonatomic, strong, nullable) NSString *kernelStatusText;
-@property (nonatomic, assign) double kernelProgress;
-@property (nonatomic, strong, nullable) NSMutableArray<NSString *> *kernelLogs;
-@property (nonatomic, assign) BOOL kernelExploitRunning;
-
 @end
 
 @implementation MainViewController
-
-static void nx_kernel_log_callback(const char *msg) {
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelLog"
-                                                        object:nil
-                                                      userInfo:@{@"message": [NSString stringWithUTF8String:msg]}];
-}
-
-static void nx_kernel_progress_callback(double progress) {
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelProgress"
-                                                        object:nil
-                                                      userInfo:@{@"progress": @(progress)}];
-}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -70,39 +50,10 @@ static void nx_kernel_progress_callback(double progress) {
     self.payloads = [[self.payloadStorage loadPayloads] mutableCopy];
     [self restoreRememberedPayload];
 
-    // Initialize kernel state
-    self.kernelStatus = NXKernelStatusNotStarted;
-    self.kernelStatusText = @"Not started";
-    self.kernelProgress = 0.0;
-    self.kernelLogs = [NSMutableArray array];
-    self.kernelExploitRunning = NO;
-
-    // Check if already supported and has offsets cached
-    if (!NXKernelIsSupported()) {
-        self.kernelStatus = NXKernelStatusFailed;
-        self.kernelStatusText = @"Device/iOS not supported";
-    } else if (NXKernelHasOffsets()) {
-        // Offsets cached, ready to run
-        self.kernelStatusText = @"Ready to exploit";
-    }
-
-    NXKernelSetLogCallback(nx_kernel_log_callback);
-    NXKernelSetProgressCallback(nx_kernel_progress_callback);
-
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(handleKernelLog:)
-                                                 name:@"NXKernelLog"
-                                               object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(handleKernelProgress:)
-                                                 name:@"NXKernelProgress"
-                                               object:nil];
-
     self.usbEnum = [[NXUSBDeviceEnumerator alloc] init];
     self.usbEnum.delegate = self;
     [self.usbEnum setFilterForVendorID:kTegraX1VendorID productID:kTegraX1ProductID];
-    // Only start USB enumeration after kernel exploit succeeds
-    // [self.usbEnum start];
+    [self.usbEnum start];
 
     self.navigationItem.leftBarButtonItem = self.settingsButtonItem;
     self.navigationItem.rightBarButtonItem = self.editButtonItem;
@@ -117,7 +68,7 @@ static void nx_kernel_progress_callback(double progress) {
     if (!Settings.rememberPayload) {
         return;
     }
-
+    
     NSString *payloadFileName = Settings.lastPayloadFileName;
     if (!payloadFileName) {
         return;
@@ -143,101 +94,6 @@ static void nx_kernel_progress_callback(double progress) {
     [self.usbEnum stop];
 }
 
-#pragma mark - Kernel Exploit
-
-- (void)handleKernelLog:(NSNotification *)note {
-    NSString *msg = note.userInfo[@"message"];
-    if (msg) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self.kernelLogs addObject:msg];
-            // Keep last 50 log lines
-            if (self.kernelLogs.count > 50) {
-                [self.kernelLogs removeObjectAtIndex:0];
-            }
-            NSIndexPath *indexPath = [NSIndexPath indexPathForRow:2 inSection:TableSectionKernel];
-            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-            if (cell) {
-                [cell setNeedsLayout];
-            }
-        });
-    }
-}
-
-- (void)handleKernelProgress:(NSNotification *)note {
-    double progress = [note.userInfo[@"progress"] doubleValue];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.kernelProgress = progress;
-        NSIndexPath *indexPath = [NSIndexPath indexPathForRow:1 inSection:TableSectionKernel];
-        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-        if (cell) {
-            UIProgressView *pv = (UIProgressView *)[cell viewWithTag:999];
-            pv.progress = (float)progress;
-        }
-    });
-}
-
-- (void)runKernelExploit {
-    if (self.kernelExploitRunning) return;
-    if (!NXKernelIsSupported()) {
-        self.kernelStatus = NXKernelStatusFailed;
-        self.kernelStatusText = @"Device/iOS not supported";
-        [self reloadKernelSection];
-        return;
-    }
-
-    self.kernelExploitRunning = YES;
-    self.kernelStatus = NXKernelStatusRunning;
-    self.kernelStatusText = @"Running exploit...";
-    self.kernelProgress = 0.0;
-    [self.kernelLogs removeAllObjects];
-    [self reloadKernelSection];
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Download offsets if not cached
-        if (!NXKernelHasOffsets()) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                self.kernelStatusText = @"Downloading kernelcache...";
-                [self reloadKernelSection];
-            });
-            if (!NXKernelDownloadOffsets()) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.kernelStatus = NXKernelStatusFailed;
-                    self.kernelStatusText = @"Failed to download kernelcache";
-                    self.kernelExploitRunning = NO;
-                    [self reloadKernelSection];
-                });
-                return;
-            }
-        }
-
-        NXKernelInitOffsets();
-
-        NXKernelStatus status = NXKernelRun();
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.kernelExploitRunning = NO;
-            self.kernelStatus = status;
-            if (status == NXKernelStatusReady) {
-                self.kernelStatusText = [NSString stringWithFormat:@"Ready (slide: 0x%llx)", NXKernelGetSlide()];
-                // Start USB enumeration now that kernel r/w is available
-                [self.usbEnum start];
-            } else {
-                self.kernelStatusText = @"Exploit failed";
-            }
-            [self reloadKernelSection];
-            // Reveal/hide Switch and Payload sections
-            [self.tableView reloadData];
-        });
-    });
-}
-
-- (void)reloadKernelSection {
-    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:TableSectionKernel]
-                  withRowAnimation:UITableViewRowAnimationNone];
-}
-
-#pragma mark - Switch Boot
-
 - (void)bootPayload:(Payload *)payload {
     NSData *relocator = [PayloadStorage relocator];
     assert(relocator != nil);
@@ -253,7 +109,7 @@ static void nx_kernel_progress_callback(double progress) {
     NSString *error = nil;
     if (NXExec(self.usbDevice, relocator, payloadData, &error)) {
         self.usbError = nil;
-        [self updateDeviceStatus:@"Payload injected"];
+        [self updateDeviceStatus:@"Payload injected 🎉"];
     } else {
         self.usbError = error;
         [self updateDeviceStatus:@"Payload injection error"];
@@ -267,10 +123,9 @@ static void nx_kernel_progress_callback(double progress) {
 #pragma mark - Table
 
 typedef NS_ENUM(NSInteger, TableSection) {
-    TableSectionKernel,
+    TableSectionLinks,
     TableSectionDevice,
     TableSectionPayloads,
-    TableSectionLinks,
 };
 
 - (void)refreshPayloadList {
@@ -310,13 +165,17 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
     NSIndexPath *newPayloadPath = [NSIndexPath indexPathForRow:self.payloads.count inSection:TableSectionPayloads];
     if (self.payloads.count != 0) {
+        // will always show "add payload" row when there is no payload
         if (editing && !wasEditing) {
+            // add new payload row
             [self.tableView insertRowsAtIndexPaths:@[newPayloadPath] withRowAnimation:animation];
         } else if (!editing && wasEditing) {
+            // remove new payload row
             [self.tableView deleteRowsAtIndexPaths:@[newPayloadPath] withRowAnimation:animation];
         }
     }
 
+    // update payload section footer for rename hint
     [self.tableView footerViewForSection:TableSectionPayloads].textLabel.text = [self tableView:self.tableView titleForFooterInSection:TableSectionPayloads];
 
     [self.tableView endUpdates];
@@ -327,15 +186,12 @@ typedef NS_ENUM(NSInteger, TableSection) {
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    if (self.kernelStatus == NXKernelStatusReady) {
-        return 4;
-    }
-    return 2; // Kernel + Links only
+    return 3;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     switch (section) {
-        case TableSectionKernel: return 3;
+        case TableSectionLinks: return 2;
         case TableSectionDevice: return 1;
         case TableSectionPayloads: {
             if (self.payloads.count == 0) {
@@ -346,15 +202,13 @@ typedef NS_ENUM(NSInteger, TableSection) {
                 return self.payloads.count;
             }
         }
-        case TableSectionLinks: return 2;
     }
     return 0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     switch (section) {
-        case TableSectionKernel: return @"Kernel Exploit";
-        case TableSectionDevice: return @"Nintendo Switch";
+        case TableSectionDevice: return @"Device";
         case TableSectionPayloads: return @"Payloads";
     }
     return [super tableView:tableView titleForHeaderInSection:section];
@@ -362,14 +216,6 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     switch (section) {
-        case TableSectionKernel: {
-            if (self.kernelStatus == NXKernelStatusNotStarted) {
-                return @"Runs the Darksword IOSurface/ICMPv6 exploit to gain kernel read/write on this device. Supports iOS 17.0 – 26.0.1. MIE devices (iPhone 16 series) and LiveContainer are not supported.";
-            } else if (self.kernelStatus == NXKernelStatusReady) {
-                return [NSString stringWithFormat:@"Kernel base: 0x%llx  Slide: 0x%llx", NXKernelGetBase(), NXKernelGetSlide()];
-            }
-            return nil;
-        }
         case TableSectionDevice:
             return [self footerForDeviceCell];
         case TableSectionPayloads:
@@ -384,76 +230,6 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     switch (indexPath.section) {
-        case TableSectionKernel: {
-            switch (indexPath.row) {
-                case 0: {
-                    // Status cell
-                    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"KernelStatusCell"];
-                    if (!cell) {
-                        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
-                                                      reuseIdentifier:@"KernelStatusCell"];
-                    }
-                    cell.textLabel.text = @"Status";
-                    cell.detailTextLabel.text = self.kernelStatusText;
-                    cell.detailTextLabel.textColor = [self colorForKernelStatus:self.kernelStatus];
-                    return cell;
-                }
-                case 1: {
-                    // Progress cell
-                    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"KernelProgressCell"];
-                    if (!cell) {
-                        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
-                                                      reuseIdentifier:@"KernelProgressCell"];
-                        UIProgressView *pv = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-                        pv.tag = 999;
-                        pv.translatesAutoresizingMaskIntoConstraints = NO;
-                        [cell.contentView addSubview:pv];
-                        [NSLayoutConstraint activateConstraints:@[
-                            [pv.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:15],
-                            [pv.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-15],
-                            [pv.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-                        ]];
-                    }
-                    UIProgressView *pv = (UIProgressView *)[cell viewWithTag:999];
-                    pv.progress = (float)self.kernelProgress;
-                    pv.hidden = (self.kernelStatus != NXKernelStatusRunning);
-                    return cell;
-                }
-                case 2: {
-                    // Run button / log cell
-                    if (self.kernelStatus == NXKernelStatusNotStarted ||
-                        self.kernelStatus == NXKernelStatusFailed) {
-                        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
-                        if (self.kernelStatus == NXKernelStatusFailed && !NXKernelIsSupported()) {
-                            cell.textLabel.text = @"Unsupported Device";
-                            cell.textLabel.textColor = self.textColorInactive;
-                            cell.accessoryType = UITableViewCellAccessoryNone;
-                        } else {
-                            cell.textLabel.text = @"Run Exploit";
-                            cell.textLabel.textColor = self.textColorButton;
-                            cell.accessoryType = self.kernelExploitRunning ? UITableViewCellAccessoryNone : UITableViewCellAccessoryDisclosureIndicator;
-                        }
-                        return cell;
-                    } else {
-                        // Show last log line
-                        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"KernelLogCell"];
-                        if (!cell) {
-                            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
-                                                          reuseIdentifier:@"KernelLogCell"];
-                            cell.textLabel.numberOfLines = 0;
-                            cell.textLabel.font = [UIFont fontWithName:@"Menlo" size:11];
-                        }
-                        if (self.kernelLogs.count > 0) {
-                            cell.textLabel.text = self.kernelLogs.lastObject;
-                        } else {
-                            cell.textLabel.text = @"Initializing...";
-                        }
-                        return cell;
-                    }
-                }
-            }
-            break;
-        }
         case TableSectionLinks: {
             UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ButtonCell" forIndexPath:indexPath];
             [self configureLinkCell:cell];
@@ -493,15 +269,6 @@ typedef NS_ENUM(NSInteger, TableSection) {
     return nil;
 }
 
-- (UIColor *)colorForKernelStatus:(NXKernelStatus)status {
-    switch (status) {
-        case NXKernelStatusReady:   return [UIColor systemGreenColor];
-        case NXKernelStatusRunning: return [UIColor systemOrangeColor];
-        case NXKernelStatusFailed:  return [UIColor systemRedColor];
-        default:                    return self.textColorInactive;
-    }
-}
-
 - (void)configureLinkCell:(UITableViewCell *)cell {
     if (self.editing) {
         cell.accessoryType = UITableViewCellAccessoryNone;
@@ -521,7 +288,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
     if (self.usbError) {
         return self.usbError;
     } else {
-        return @"Connect your Nintendo Switch in RCM mode via a Lightning OTG adapter. An unsupported \"APX\" device warning from iOS can safely be ignored.";
+        return @"Connect your Nintendo Switch in RCM mode via a Lighting OTG adapter. An unsupported \"APX\" device warning from iOS can safely be ignored.";
     }
 }
 
@@ -561,6 +328,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (UITableViewCellEditingStyle)tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (!self.editing) {
+        // Disable swipe-to-delete, assuming the user seldomly wants to delete payloads.
         return UITableViewCellEditingStyleNone;
     }
     if (indexPath.section != TableSectionPayloads) {
@@ -597,17 +365,9 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (NSIndexPath *)tableView:(UITableView *)tableView willSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     if (self.isEditing && indexPath.section != TableSectionPayloads) {
-        return nil;
-    } else if (indexPath.section == TableSectionKernel) {
-        if (indexPath.row == 2 && !self.kernelExploitRunning &&
-            (self.kernelStatus == NXKernelStatusNotStarted || self.kernelStatus == NXKernelStatusFailed)) {
-            return indexPath;
-        }
-        return nil;
-    } else if (self.kernelStatus != NXKernelStatusReady) {
-        return nil; // nothing selectable until kernel is ready
+        return nil; // nothing except payloads can be tapped in edit mode
     } else if (indexPath.section == TableSectionDevice) {
-        return nil;
+        return nil; // device can never be tapped
     } else {
         return indexPath;
     }
@@ -616,11 +376,6 @@ typedef NS_ENUM(NSInteger, TableSection) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [self.tableView deselectRowAtIndexPath:indexPath animated:YES];
     switch (indexPath.section) {
-        case TableSectionKernel:
-            if (indexPath.row == 2) {
-                [self runKernelExploit];
-            }
-            break;
         case TableSectionLinks:
             switch (indexPath.row) {
                 case 0:
@@ -726,6 +481,7 @@ typedef NS_ENUM(NSInteger, TableSection) {
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url {
+    // we are provided a local copy due to LSSupportsOpeningDocumentsInPlace=NO in Info.plist (default)
     NSError *error = nil;
     Payload *payload = [self.payloadStorage importPayload:url.path move:YES error:&error];
     if (payload) {
@@ -733,8 +489,10 @@ typedef NS_ENUM(NSInteger, TableSection) {
         [self.payloads addObject:payload];
         [self.payloadStorage storePayloadSortOrder:self.payloads];
         if (self.payloads.count == 1 && !self.editing) {
+            // remove add payload cell
             NSIndexPath *addButtonPath = [NSIndexPath indexPathForRow:0 inSection:TableSectionPayloads];
             [self.tableView deleteRowsAtIndexPaths:@[addButtonPath] withRowAnimation:UITableViewRowAnimationAutomatic];
+            // simultaneously insert the first entry below it
             NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:TableSectionPayloads];
             [self.tableView insertRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
         } else {
