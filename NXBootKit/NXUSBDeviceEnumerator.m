@@ -7,6 +7,9 @@
 #import <mach/mach.h>
 #import <TargetConditionals.h>
 
+extern const CFUUIDRef kIOUSBHostDeviceUserClientTypeID __attribute__((weak_import));
+extern const CFUUIDRef kIOUSBHostDeviceInterfaceID __attribute__((weak_import));
+
 #ifndef NXBOOTMAC_BUILDING
 // use kIOMasterPortDefault for NXBoot iOS and command line builds for compatibility
 #pragma clang diagnostic push
@@ -136,18 +139,43 @@ static void bridgeDeviceNotification(void *u, io_service_t service, natural_t me
         io_name_t ioClassName;
         ioClassName[0] = '\0';
         (void)IOObjectGetClass(service, ioClassName);
+
+        BOOL classIsHostDevice = (strcmp(ioClassName, "IOUSBHostDevice") == 0);
+        const CFUUIDRef preferredUserClient = (classIsHostDevice && kIOUSBHostDeviceUserClientTypeID)
+            ? kIOUSBHostDeviceUserClientTypeID
+            : kIOUSBDeviceUserClientTypeID;
+
         kr = IOCreatePlugInInterfaceForService(service,
-                                               kIOUSBDeviceUserClientTypeID,
+                                               preferredUserClient,
                                                kIOCFPlugInInterfaceID,
                                                &plugInInterface,
                                                &plugInScore);
+
+        if ((kr || !plugInInterface) && preferredUserClient != kIOUSBDeviceUserClientTypeID) {
+            NXLog(@"USB: host user client plugin failed (%08x), retrying legacy user client", kr);
+            kr = IOCreatePlugInInterfaceForService(service,
+                                                   kIOUSBDeviceUserClientTypeID,
+                                                   kIOCFPlugInInterfaceID,
+                                                   &plugInInterface,
+                                                   &plugInScore);
+        }
+
         if (kr || !plugInInterface) {
             ERR(@"Could not create USB device plugin instance (%08x) class=%s score=%d", kr, ioClassName, (int)plugInScore);
             goto cleanup;
         }
+
         kr = (*plugInInterface)->QueryInterface(plugInInterface,
                                                 CFUUIDGetUUIDBytes(kNXUSBDeviceInterfaceUUID),
                                                 (void *)&device->_intf);
+
+        if ((kr || !device->_intf) && classIsHostDevice && kIOUSBHostDeviceInterfaceID) {
+            NXLog(@"USB: legacy device interface query failed (%08x), retrying host interface UUID", kr);
+            kr = (*plugInInterface)->QueryInterface(plugInInterface,
+                                                    CFUUIDGetUUIDBytes(kIOUSBHostDeviceInterfaceID),
+                                                    (void *)&device->_intf);
+        }
+
         NXCOMCall(plugInInterface, Release);
         plugInInterface = NULL;
         if (kr || !device->_intf) {
