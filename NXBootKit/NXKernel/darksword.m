@@ -7,6 +7,7 @@
 
 #include "darksword.h"
 #include "utils.h"
+#include "offsets.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -962,7 +963,22 @@ static int pe(void) {
     pe_log("kernel r/w is ready!");
     ds_progress(1.0);
     
+    // Ensure proc walking offsets are initialized before resolving our_proc.
+    init_offsets();
+    if (!haskernproc()) {
+        pe_log("kernproc offset missing, attempting kernelcache offset refresh");
+        dlkerncache();
+        init_offsets();
+    }
+
     our_proc = ourproc();
+    if (!our_proc) {
+        pe_log("ourproc() failed, refreshing kernel offsets and retrying once");
+        if (dlkerncache()) {
+            init_offsets();
+            our_proc = ourproc();
+        }
+    }
     our_task = taskbyproc(our_proc);
     
     pe_log("our_proc: 0x%llx", our_proc);
