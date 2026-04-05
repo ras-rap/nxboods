@@ -56,6 +56,11 @@ static void NXBootKernelLogCallback(const char *message) {
     return [docs stringByAppendingPathComponent:@"nxboot-live.log"];
 }
 
+- (NSString *)logExportDirectoryPath {
+    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    return [docs stringByAppendingPathComponent:@"nxboot-exports"];
+}
+
 - (void)appendPersistentLogLine:(NSString *)line {
     if (line.length == 0) return;
 
@@ -240,8 +245,8 @@ static void NXBootKernelLogCallback(const char *message) {
             if (self.entitlementsPatched) {
                 [self.usbEnum start];
             } else {
-                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Escape Failed"
-                                                                             message:@"Could not escape sandbox. USB access may not work."
+                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"USB Prep Failed"
+                                                                             message:@"Could not fully prepare USB access. Sandbox escape or entitlement patching failed."
                                                                       preferredStyle:UIAlertControllerStyleAlert];
                 [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:alert animated:YES completion:nil];
@@ -737,7 +742,21 @@ typedef NS_ENUM(NSInteger, TableSection) {
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.dateFormat = @"yyyyMMdd-HHmmss";
     NSString *fileName = [NSString stringWithFormat:@"nxboot-log-%@.txt", [formatter stringFromDate:[NSDate date]]];
-    NSURL *fileURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:fileName]];
+    NSString *exportDirectory = [self logExportDirectoryPath];
+    NSError *directoryError = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:exportDirectory
+                                   withIntermediateDirectories:YES
+                                                    attributes:nil
+                                                         error:&directoryError]) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Failed"
+                                                                         message:directoryError.localizedDescription ?: @"Could not create export folder."
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    NSURL *fileURL = [NSURL fileURLWithPath:[exportDirectory stringByAppendingPathComponent:fileName]];
 
     NSError *writeError = nil;
     BOOL wrote = [body writeToURL:fileURL atomically:YES encoding:NSUTF8StringEncoding error:&writeError];
