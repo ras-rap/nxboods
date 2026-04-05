@@ -29,6 +29,7 @@ static void nx_internal_progress(double progress) {
 void NXKernelSetLogCallback(NXKernelLogCallback callback) {
     g_nx_log_callback = callback;
     ds_set_log_callback(callback ? (ds_log_callback_t)callback : NULL);
+    sbx_setlogcallback(callback ? (void (*)(const char *))callback : NULL);
 }
 
 void NXKernelSetProgressCallback(NXKernelProgressCallback callback) {
@@ -110,7 +111,22 @@ uint64_t NXKernelProcByName(const char *name) {
 }
 
 int NXKernelSandboxEscape(void) {
-    return patchcsflags();
+    int patchResult = patchcsflags();
+    if (patchResult == 0) {
+        return 0;
+    }
+
+    uint64_t selfProc = ds_get_our_proc();
+    if (!selfProc) {
+        selfProc = ourproc();
+    }
+
+    int sbxResult = sbx_escape(selfProc);
+    if (sbxResult == 0) {
+        return 0;
+    }
+
+    return patchResult;
 }
 
 bool NXKernelIsSupported(void) {

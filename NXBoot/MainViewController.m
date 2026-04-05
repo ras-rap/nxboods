@@ -7,6 +7,17 @@
 #import "PayloadStorage.h"
 #import "Settings.h"
 
+static void NXBootKernelLogCallback(const char *message) {
+        if (!message) return;
+
+        NSString *msg = [NSString stringWithUTF8String:message];
+        if (!msg) return;
+
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelLog"
+                                                                                                                object:nil
+                                                                                                            userInfo:@{ @"message": msg }];
+}
+
 @interface MainViewController () <
         NXUSBDeviceEnumeratorDelegate,
         UIAdaptivePresentationControllerDelegate,
@@ -42,6 +53,8 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+
+    NXKernelSetLogCallback(NXBootKernelLogCallback);
 
     self.hasOffsets = NXKernelHasOffsets();
     self.downloadingOffsets = NO;
@@ -88,6 +101,7 @@
 }
 
 - (void)dealloc {
+    NXKernelSetLogCallback(NULL);
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.usbEnum stop];
 }
