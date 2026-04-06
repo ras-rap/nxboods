@@ -7,6 +7,7 @@
 #import <mach/mach.h>
 #import <TargetConditionals.h>
 #import <dlfcn.h>
+#include <stdarg.h>
 
 #ifndef NXBOOTMAC_BUILDING
 // use kIOMasterPortDefault for NXBoot iOS and command line builds for compatibility
@@ -42,6 +43,20 @@ static void bridgeDeviceNotification(void *u, io_service_t service, natural_t me
     NXUSBDevice *device = (__bridge NXUSBDevice *)u;
     NXUSBDeviceEnumerator *deviceEnum = device.parentEnum;
     [deviceEnum handleDeviceNotification:device forService:service messageType:messageType messageArg:messageArg];
+}
+
+static void NXUSBLogf(NSString *fmt, ...) NS_FORMAT_FUNCTION(1, 2);
+static void NXUSBLogf(NSString *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+    va_end(args);
+
+    if (!msg) return;
+    NXLog(@"%@", msg);
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"NXKernelLog"
+                                                        object:nil
+                                                      userInfo:@{ @"message": msg }];
 }
 
 static void *NXIOKitFrameworkHandle(void) {
@@ -88,12 +103,25 @@ static CFUUIDRef NXLookupHostUUIDSymbolAny(const char * const *symbolNames, size
     for (size_t i = 0; i < symbolCount; i++) {
         CFUUIDRef uuid = NXLookupHostUUIDSymbol(symbolNames[i]);
         if (uuid) {
-            NXLog(@"%@: resolved %s", logPrefix, symbolNames[i]);
+            NXUSBLogf(@"%@: resolved %s", logPrefix, symbolNames[i]);
             return uuid;
         }
     }
 
-    NXLog(@"%@: no matching host UUID symbol found", logPrefix);
+    NXUSBLogf(@"%@: no matching host UUID symbol found", logPrefix);
+    return NULL;
+}
+
+static CFUUIDRef NXLookupLegacyUUIDSymbolAny(const char * const *symbolNames, size_t symbolCount, NSString *logPrefix) {
+    for (size_t i = 0; i < symbolCount; i++) {
+        CFUUIDRef uuid = NXLookupHostUUIDSymbol(symbolNames[i]);
+        if (uuid) {
+            NXUSBLogf(@"%@: resolved %s", logPrefix, symbolNames[i]);
+            return uuid;
+        }
+    }
+
+    NXUSBLogf(@"%@: no matching legacy UUID symbol found", logPrefix);
     return NULL;
 }
 
@@ -107,7 +135,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
     *plugInInterface = NULL;
     *plugInScore = -1;
 
-    NXLog(@"%@: creating plugin with preferred user client", logPrefix);
+    NXUSBLogf(@"%@: creating plugin with preferred user client", logPrefix);
     kern_return_t kr = IOCreatePlugInInterfaceForService(service,
                                                          preferredUserClient,
                                                          kIOCFPlugInInterfaceID,
@@ -115,7 +143,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
                                                          plugInScore);
 
     if ((kr || !*plugInInterface) && preferredUserClient != fallbackUserClient) {
-        NXLog(@"%@: preferred user client plugin failed (%08x), retrying fallback", logPrefix, kr);
+        NXUSBLogf(@"%@: preferred user client plugin failed (%08x), retrying fallback", logPrefix, kr);
         *plugInInterface = NULL;
         *plugInScore = -1;
         kr = IOCreatePlugInInterfaceForService(service,
@@ -126,9 +154,9 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
     }
 
     if (kr || !*plugInInterface) {
-        NXLog(@"%@: plugin creation failed (%08x) score=%d", logPrefix, kr, (int)*plugInScore);
+        NXUSBLogf(@"%@: plugin creation failed (%08x) score=%d", logPrefix, kr, (int)*plugInScore);
     } else {
-        NXLog(@"%@: plugin creation succeeded score=%d", logPrefix, (int)*plugInScore);
+        NXUSBLogf(@"%@: plugin creation succeeded score=%d", logPrefix, (int)*plugInScore);
     }
 
     return kr;
@@ -201,14 +229,14 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
         }
     }
 
-    NXLog(@"USB: OK, listening for devices matching VID:%04x PID:%04x", self.VID, self.PID);
+    NXUSBLogf(@"USB: OK, listening for devices matching VID:%04x PID:%04x", self.VID, self.PID);
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [self handleDevicesAdded:self->_deviceIter];
         if (self->_legacyDeviceIter) {
             [self handleDevicesAdded:self->_legacyDeviceIter];
         }
-        NXLog(@"USB: Done processing initial device list");
+        NXUSBLogf(@"USB: Done processing initial device list");
     });
 }
 
@@ -232,7 +260,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
     kern_return_t kr;
     io_service_t service;
 
-    NXLog(@"USB: Processing new devices");
+    NXUSBLogf(@"USB: Processing new devices");
 
     while ((service = IOIteratorNext(iterator))) {
         NXUSBDevice *device = [[NXUSBDevice alloc] init];
@@ -245,7 +273,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
             ioDeviceName[0] = '\0';
         }
         device.name = [NSString stringWithCString:ioDeviceName encoding:NSASCIIStringEncoding];
-        NXLog(@"USB: Device added: 0x%08x `%@'", service, device.name);
+        NXUSBLogf(@"USB: Device added: 0x%08x `%@'", service, device.name);
 
         // load the device interface implementation bundle
         IOCFPlugInInterface **plugInInterface = NULL;
@@ -269,22 +297,44 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
             "kIOUSBHostDeviceInterfaceID500",
             "kIOUSBHostDeviceInterfaceID550",
         };
+        static const char * const legacyUserClientNames[] = {
+            "kIOUSBDeviceUserClientTypeID",
+            "kIOUSBDeviceUserClientTypeID245",
+            "kIOUSBDeviceUserClientTypeID300",
+            "kIOUSBDeviceUserClientTypeID500",
+            "kIOUSBDeviceUserClientTypeID550",
+        };
+        static const char * const legacyInterfaceNames[] = {
+            "kIOUSBDeviceInterfaceID",
+            "kIOUSBDeviceInterfaceID245",
+            "kIOUSBDeviceInterfaceID300",
+            "kIOUSBDeviceInterfaceID500",
+            "kIOUSBDeviceInterfaceID550",
+        };
         CFUUIDRef hostUserClientTypeID = NXLookupHostUUIDSymbolAny(hostUserClientNames,
                                                                    sizeof(hostUserClientNames) / sizeof(hostUserClientNames[0]),
                                                                    @"USB: host user-client UUID");
         CFUUIDRef hostInterfaceID = NXLookupHostUUIDSymbolAny(hostInterfaceNames,
                                                               sizeof(hostInterfaceNames) / sizeof(hostInterfaceNames[0]),
                                                               @"USB: host interface UUID");
-        NXLog(@"USB: class=%s hostUserClient=%s hostInterface=%s",
-              ioClassName,
-              hostUserClientTypeID ? "yes" : "no",
-              hostInterfaceID ? "yes" : "no");
+        CFUUIDRef legacyUserClientTypeID = NXLookupLegacyUUIDSymbolAny(legacyUserClientNames,
+                                                                        sizeof(legacyUserClientNames) / sizeof(legacyUserClientNames[0]),
+                                                                        @"USB: legacy user-client UUID");
+        CFUUIDRef legacyInterfaceID = NXLookupLegacyUUIDSymbolAny(legacyInterfaceNames,
+                                                                   sizeof(legacyInterfaceNames) / sizeof(legacyInterfaceNames[0]),
+                                                                   @"USB: legacy interface UUID");
+        NXUSBLogf(@"USB: class=%s hostUserClient=%s hostInterface=%s legacyUserClient=%s legacyInterface=%s",
+                  ioClassName,
+                  hostUserClientTypeID ? "yes" : "no",
+                  hostInterfaceID ? "yes" : "no",
+                  legacyUserClientTypeID ? "yes" : "no",
+                  legacyInterfaceID ? "yes" : "no");
         const CFUUIDRef preferredUserClient = (classIsHostDevice && hostUserClientTypeID)
             ? hostUserClientTypeID
-            : kIOUSBDeviceUserClientTypeID;
+            : (legacyUserClientTypeID ?: kIOUSBDeviceUserClientTypeID);
 
         if (classIsHostDevice && !hostUserClientTypeID) {
-            NXLog(@"USB: host device client UUID unavailable, legacy fallback may be unsupported");
+            NXUSBLogf(@"USB: host device client UUID unavailable, legacy fallback may be unsupported");
         }
 
         kr = NXCreatePluginForServiceWithFallback(service,
@@ -318,9 +368,16 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
                                                 (void *)&device->_intf);
 
         if ((kr || !device->_intf) && classIsHostDevice && hostInterfaceID) {
-            NXLog(@"USB: legacy device interface query failed (%08x), retrying host interface UUID", kr);
+            NXUSBLogf(@"USB: legacy device interface query failed (%08x), retrying host interface UUID", kr);
             kr = (*plugInInterface)->QueryInterface(plugInInterface,
                                                     CFUUIDGetUUIDBytes(hostInterfaceID),
+                                                    (void *)&device->_intf);
+        }
+
+        if ((kr || !device->_intf) && legacyInterfaceID) {
+            NXUSBLogf(@"USB: host/compile-time interface query failed (%08x), retrying legacy interface UUID", kr);
+            kr = (*plugInInterface)->QueryInterface(plugInInterface,
+                                                    CFUUIDGetUUIDBytes(legacyInterfaceID),
                                                     (void *)&device->_intf);
         }
 
@@ -337,7 +394,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
             ERR(@"GetLocationID failed with code %08x, skipping device\n", kr);
             goto cleanup;
         }
-        NXLog(@"USB: Device location ID: 0x%lx\n", (unsigned long)device->_locationID);
+        NXUSBLogf(@"USB: Device location ID: 0x%lx", (unsigned long)device->_locationID);
 
         // register for device events
         kr = IOServiceAddInterestNotification(self.notifyPort,
@@ -372,7 +429,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
 
     switch (messageType) {
         case kIOMessageServiceIsTerminated: {
-            NXLog(@"USB: Device 0x%08x removed", service);
+            NXUSBLogf(@"USB: Device 0x%08x removed", service);
             [device invalidate];
             [self.delegate usbDeviceEnumerator:self deviceDisconnected:device];
             device = (__bridge_transfer NXUSBDevice *)(__bridge void *)device;
