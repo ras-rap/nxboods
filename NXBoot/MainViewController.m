@@ -72,6 +72,9 @@ static void NXBootKernelLogCallback(const char *message) {
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:path]) {
         [fm createFileAtPath:path contents:nil attributes:nil];
+        [fm setAttributes:@{ NSFileProtectionKey: NSFileProtectionNone }
+             ofItemAtPath:path
+                    error:nil];
     }
 
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
@@ -89,6 +92,43 @@ static void NXBootKernelLogCallback(const char *message) {
     }
 
     [fh closeFile];
+}
+
+- (void)hydrateInMemoryLogsFromPersistentFile {
+    NSString *path = [self persistentLogFilePath];
+    NSString *content = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    if (content.length == 0) return;
+
+    NSArray<NSString *> *allLines = [content componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSMutableArray<NSString *> *trimmed = [NSMutableArray arrayWithCapacity:MIN((NSUInteger)200, allLines.count)];
+
+    NSUInteger start = allLines.count > 200 ? (allLines.count - 200) : 0;
+    for (NSUInteger i = start; i < allLines.count; i++) {
+        NSString *line = allLines[i];
+        if (line.length == 0) continue;
+        [trimmed addObject:line];
+    }
+
+    self.logs = trimmed;
+}
+
+- (void)presentShareSheetForURL:(NSURL *)fileURL {
+    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL]
+                                                                          applicationActivities:nil];
+    if (share.popoverPresentationController) {
+        share.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItems.lastObject;
+    }
+
+    UIViewController *presented = self.presentedViewController;
+    if (presented) {
+        __weak typeof(self) weakSelf = self;
+        [presented dismissViewControllerAnimated:YES completion:^{
+            [weakSelf presentViewController:share animated:YES completion:nil];
+        }];
+        return;
+    }
+
+    [self presentViewController:share animated:YES completion:nil];
 }
 
 - (void)viewDidLoad {
@@ -109,6 +149,7 @@ static void NXBootKernelLogCallback(const char *message) {
     self.kernelBaseText = nil;
     self.kernelSlideText = nil;
     self.logs = [NSMutableArray array];
+    [self hydrateInMemoryLogsFromPersistentFile];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(refreshPayloadList)
@@ -716,11 +757,23 @@ typedef NS_ENUM(NSInteger, TableSection) {
 
 - (void)exportLogs {
     NSString *persistentPath = [self persistentLogFilePath];
-    NSString *persistentLog = [NSString stringWithContentsOfFile:persistentPath encoding:NSUTF8StringEncoding error:nil];
+    NSError *readError = nil;
+    NSString *persistentLog = [NSString stringWithContentsOfFile:persistentPath
+                                                        encoding:NSUTF8StringEncoding
+                                                           error:&readError];
 
     NSString *content = persistentLog;
     if (content.length == 0 && self.logs.count > 0) {
         content = [self.logs componentsJoinedByString:@"\n"];
+    }
+
+    if (content.length == 0 && readError) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Failed"
+                                                                         message:readError.localizedDescription ?: @"Could not read persistent log file."
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
     }
 
     if (content.length == 0) {
@@ -743,11 +796,12 @@ typedef NS_ENUM(NSInteger, TableSection) {
     formatter.dateFormat = @"yyyyMMdd-HHmmss";
     NSString *fileName = [NSString stringWithFormat:@"nxboot-log-%@.txt", [formatter stringFromDate:[NSDate date]]];
     NSString *exportDirectory = [self logExportDirectoryPath];
+        NSFileManager *fm = [NSFileManager defaultManager];
     NSError *directoryError = nil;
-    if (![[NSFileManager defaultManager] createDirectoryAtPath:exportDirectory
-                                   withIntermediateDirectories:YES
-                                                    attributes:nil
-                                                         error:&directoryError]) {
+        if (![fm createDirectoryAtPath:exportDirectory
+          withIntermediateDirectories:YES
+                        attributes:@{ NSFileProtectionKey: NSFileProtectionNone }
+                            error:&directoryError]) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Export Failed"
                                                                          message:directoryError.localizedDescription ?: @"Could not create export folder."
                                                                   preferredStyle:UIAlertControllerStyleAlert];
@@ -769,12 +823,11 @@ typedef NS_ENUM(NSInteger, TableSection) {
         return;
     }
 
-    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL]
-                                                                          applicationActivities:nil];
-    if (share.popoverPresentationController) {
-        share.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItems.lastObject;
-    }
-    [self presentViewController:share animated:YES completion:nil];
+    [fm setAttributes:@{ NSFileProtectionKey: NSFileProtectionNone }
+         ofItemAtPath:fileURL.path
+                error:nil];
+
+    [self presentShareSheetForURL:fileURL];
 }
 
 - (IBAction)settingsUnwindAction:(UIStoryboardSegue *)unwindSegue {
