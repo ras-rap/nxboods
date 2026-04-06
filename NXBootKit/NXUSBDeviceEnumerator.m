@@ -125,6 +125,80 @@ static CFUUIDRef NXLookupLegacyUUIDSymbolAny(const char * const *symbolNames, si
     return NULL;
 }
 
+static CFUUIDRef NXCopyRegistryPluginTypeUUID(io_registry_entry_t service, NSString *logPrefix) {
+    if (!service) {
+        return NULL;
+    }
+
+    CFTypeRef pluginTypes = IORegistryEntryCreateCFProperty(service,
+                                                            CFSTR("IOCFPlugInTypes"),
+                                                            kCFAllocatorDefault,
+                                                            0);
+    if (!pluginTypes) {
+        NXUSBLogf(@"%@: IOCFPlugInTypes missing", logPrefix);
+        return NULL;
+    }
+
+    if (CFGetTypeID(pluginTypes) != CFDictionaryGetTypeID()) {
+        NXUSBLogf(@"%@: IOCFPlugInTypes has unexpected type", logPrefix);
+        CFRelease(pluginTypes);
+        return NULL;
+    }
+
+    CFDictionaryRef dict = (CFDictionaryRef)pluginTypes;
+    CFIndex count = CFDictionaryGetCount(dict);
+    if (count <= 0) {
+        NXUSBLogf(@"%@: IOCFPlugInTypes empty", logPrefix);
+        CFRelease(pluginTypes);
+        return NULL;
+    }
+
+    const void **keys = calloc((size_t)count, sizeof(void *));
+    if (!keys) {
+        NXUSBLogf(@"%@: IOCFPlugInTypes allocation failed", logPrefix);
+        CFRelease(pluginTypes);
+        return NULL;
+    }
+
+    CFDictionaryGetKeysAndValues(dict, keys, NULL);
+    CFUUIDRef selectedUUID = NULL;
+    for (CFIndex i = 0; i < count; i++) {
+        CFTypeRef key = keys[i];
+        if (!key) {
+            continue;
+        }
+
+        if (CFGetTypeID(key) == CFUUIDGetTypeID()) {
+            selectedUUID = (CFUUIDRef)key;
+            CFRetain(selectedUUID);
+            break;
+        }
+
+        if (CFGetTypeID(key) == CFStringGetTypeID()) {
+            selectedUUID = CFUUIDCreateFromString(kCFAllocatorDefault, (CFStringRef)key);
+            if (selectedUUID) {
+                break;
+            }
+        }
+    }
+
+    free(keys);
+    CFRelease(pluginTypes);
+
+    if (!selectedUUID) {
+        NXUSBLogf(@"%@: IOCFPlugInTypes had no UUID keys", logPrefix);
+        return NULL;
+    }
+
+    CFStringRef uuidStr = CFUUIDCreateString(kCFAllocatorDefault, selectedUUID);
+    if (uuidStr) {
+        NXUSBLogf(@"%@: using IOCFPlugInTypes UUID %@", logPrefix, (__bridge NSString *)uuidStr);
+        CFRelease(uuidStr);
+    }
+
+    return selectedUUID;
+}
+
 static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
                                                           const CFUUIDRef preferredUserClient,
                                                           const CFUUIDRef fallbackUserClient,
@@ -332,6 +406,8 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
         const CFUUIDRef preferredUserClient = (classIsHostDevice && hostUserClientTypeID)
             ? hostUserClientTypeID
             : (legacyUserClientTypeID ?: kIOUSBDeviceUserClientTypeID);
+        CFUUIDRef registryUserClientTypeID = NXCopyRegistryPluginTypeUUID(service,
+                                                                          @"USB: current service plugin type");
 
         if (classIsHostDevice && !hostUserClientTypeID) {
             NXUSBLogf(@"USB: host device client UUID unavailable, legacy fallback may be unsupported");
@@ -344,18 +420,48 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
                                                   &plugInScore,
                                                   @"USB: current service");
 
+        if ((kr || !plugInInterface) && registryUserClientTypeID &&
+            !CFEqual(registryUserClientTypeID, preferredUserClient)) {
+            kr = NXCreatePluginForServiceWithFallback(service,
+                                                      registryUserClientTypeID,
+                                                      preferredUserClient,
+                                                      &plugInInterface,
+                                                      &plugInScore,
+                                                      @"USB: current service (registry UUID)");
+        }
+
         // On newer iOS stacks, the usable user client may be exposed on a related registry node.
         if (kr || !plugInInterface) {
             io_registry_entry_t parent = IO_OBJECT_NULL;
             if (IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent) == KERN_SUCCESS) {
+                CFUUIDRef parentRegistryUserClientTypeID = NXCopyRegistryPluginTypeUUID(parent,
+                                                                                        @"USB: parent service plugin type");
                 kr = NXCreatePluginForServiceWithFallback(parent,
                                                           preferredUserClient,
                                                           kIOUSBDeviceUserClientTypeID,
                                                           &plugInInterface,
                                                           &plugInScore,
                                                           @"USB: parent service");
+
+                if ((kr || !plugInInterface) && parentRegistryUserClientTypeID &&
+                    !CFEqual(parentRegistryUserClientTypeID, preferredUserClient)) {
+                    kr = NXCreatePluginForServiceWithFallback(parent,
+                                                              parentRegistryUserClientTypeID,
+                                                              preferredUserClient,
+                                                              &plugInInterface,
+                                                              &plugInScore,
+                                                              @"USB: parent service (registry UUID)");
+                }
+
+                if (parentRegistryUserClientTypeID) {
+                    CFRelease(parentRegistryUserClientTypeID);
+                }
                 IOObjectRelease(parent);
             }
+        }
+
+        if (registryUserClientTypeID) {
+            CFRelease(registryUserClientTypeID);
         }
 
         if (kr || !plugInInterface) {
