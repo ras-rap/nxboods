@@ -430,34 +430,46 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
                                                       @"USB: current service (registry UUID)");
         }
 
-        // On newer iOS stacks, the usable user client may be exposed on a related registry node.
+        // On newer iOS stacks, the usable user client may be exposed on ancestor registry nodes.
         if (kr || !plugInInterface) {
-            io_registry_entry_t parent = IO_OBJECT_NULL;
-            if (IORegistryEntryGetParentEntry(service, kIOServicePlane, &parent) == KERN_SUCCESS) {
-                CFUUIDRef parentRegistryUserClientTypeID = NXCopyRegistryPluginTypeUUID(parent,
-                                                                                        @"USB: parent service plugin type");
-                kr = NXCreatePluginForServiceWithFallback(parent,
+            io_registry_entry_t ancestor = service;
+            IOObjectRetain(ancestor);
+            for (int depth = 1; depth <= 4 && (kr || !plugInInterface); depth++) {
+                io_registry_entry_t next = IO_OBJECT_NULL;
+                if (IORegistryEntryGetParentEntry(ancestor, kIOServicePlane, &next) != KERN_SUCCESS || !next) {
+                    break;
+                }
+
+                IOObjectRelease(ancestor);
+                ancestor = next;
+
+                NSString *prefix = [NSString stringWithFormat:@"USB: ancestor[%d] service", depth];
+                NSString *registryPrefix = [NSString stringWithFormat:@"USB: ancestor[%d] service plugin type", depth];
+
+                CFUUIDRef ancestorRegistryUserClientTypeID = NXCopyRegistryPluginTypeUUID(ancestor, registryPrefix);
+                kr = NXCreatePluginForServiceWithFallback(ancestor,
                                                           preferredUserClient,
                                                           kIOUSBDeviceUserClientTypeID,
                                                           &plugInInterface,
                                                           &plugInScore,
-                                                          @"USB: parent service");
+                                                          prefix);
 
-                if ((kr || !plugInInterface) && parentRegistryUserClientTypeID &&
-                    !CFEqual(parentRegistryUserClientTypeID, preferredUserClient)) {
-                    kr = NXCreatePluginForServiceWithFallback(parent,
-                                                              parentRegistryUserClientTypeID,
+                if ((kr || !plugInInterface) && ancestorRegistryUserClientTypeID &&
+                    !CFEqual(ancestorRegistryUserClientTypeID, preferredUserClient)) {
+                    NSString *registryAttemptPrefix = [NSString stringWithFormat:@"USB: ancestor[%d] service (registry UUID)", depth];
+                    kr = NXCreatePluginForServiceWithFallback(ancestor,
+                                                              ancestorRegistryUserClientTypeID,
                                                               preferredUserClient,
                                                               &plugInInterface,
                                                               &plugInScore,
-                                                              @"USB: parent service (registry UUID)");
+                                                              registryAttemptPrefix);
                 }
 
-                if (parentRegistryUserClientTypeID) {
-                    CFRelease(parentRegistryUserClientTypeID);
+                if (ancestorRegistryUserClientTypeID) {
+                    CFRelease(ancestorRegistryUserClientTypeID);
                 }
-                IOObjectRelease(parent);
             }
+            IOObjectRelease(ancestor);
         }
 
         if (registryUserClientTypeID) {

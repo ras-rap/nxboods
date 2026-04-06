@@ -353,22 +353,58 @@ static uint32_t find_task_offset(uint64_t proc) {
 }
 
 static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOut) {
+    static NSString *const kTaskFlagsOffKey = @"lara.task_flags_offset";
+    static NSString *const kTaskCsflagsOffKey = @"lara.task_csflags_offset";
+
+    bool (^is_plausible_task_pair)(uint32_t, uint32_t) = ^bool(uint32_t flagsOff, uint32_t csOff) {
+        if (!flagsOff || !csOff || flagsOff >= 0x1000 || csOff >= 0x1000) return false;
+        uint32_t flags = ds_kread32(task + flagsOff);
+        uint32_t cs = ds_kread32(task + csOff);
+        if ((flags & 0xffff0000U) != 0) return false;
+        if ((flags & 0x1U) == 0) return false;
+        if ((cs & CS_VALID) == 0) return false;
+        if (cs & 0xf0000000U) return false;
+        return true;
+    };
+
+    void (^persist_task_pair)(uint32_t, uint32_t) = ^(uint32_t flagsOff, uint32_t csOff) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setObject:@(flagsOff) forKey:kTaskFlagsOffKey];
+        [defaults setObject:@(csOff) forKey:kTaskCsflagsOffKey];
+        [defaults synchronize];
+    };
+
     if (taskCsflagsOffOut) {
         *taskCsflagsOffOut = 0;
     }
 
     uint32_t savedTaskFlagsOff = (uint32_t)gettaskflagsoffset();
     uint32_t savedTaskCsflagsOff = (uint32_t)gettaskcsflagsoffset();
-    if (savedTaskFlagsOff && savedTaskFlagsOff < 0x1000) {
-        uint32_t flags = ds_kread32(task + savedTaskFlagsOff);
+    if (savedTaskFlagsOff) {
         uint32_t csOff = savedTaskCsflagsOff ? savedTaskCsflagsOff : (savedTaskFlagsOff + 4);
-        uint32_t cs = ds_kread32(task + csOff);
-
-        if ((flags & 0xffff0000U) == 0 && (cs & CS_VALID) && !(cs & 0xf0000000U)) {
+        if (is_plausible_task_pair(savedTaskFlagsOff, csOff)) {
             if (taskCsflagsOffOut) {
                 *taskCsflagsOffOut = csOff;
             }
             return savedTaskFlagsOff;
+        }
+    }
+
+    static const uint32_t knownPairs[][2] = {
+        { 0x3a0, 0x3a4 },
+        { 0x3ac, 0x3b0 },
+        { 0x39c, 0x3a0 },
+        { 0x3b0, 0x3b4 },
+    };
+    for (size_t i = 0; i < sizeof(knownPairs) / sizeof(knownPairs[0]); i++) {
+        uint32_t flagsOff = knownPairs[i][0];
+        uint32_t csOff = knownPairs[i][1];
+        if (is_plausible_task_pair(flagsOff, csOff)) {
+            persist_task_pair(flagsOff, csOff);
+            if (taskCsflagsOffOut) {
+                *taskCsflagsOffOut = csOff;
+            }
+            return flagsOff;
         }
     }
 
@@ -385,7 +421,7 @@ static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOu
         }
     }
 
-    for (uint32_t off = 0x100; off < 0x500; off += 4) {
+    for (uint32_t off = 0x100; off < 0x700; off += 4) {
         uint32_t flags = ds_kread32(task + off);
         uint32_t taskFlags = ds_kread32(task + off + 4);
 
@@ -397,17 +433,29 @@ static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOu
         if (launchdTask) {
             uint32_t launchdFlags = ds_kread32(launchdTask + off);
             if (launchdFlags & 0x00000400U) {
+                persist_task_pair(off, off + 4);
                 if (taskCsflagsOffOut) {
                     *taskCsflagsOffOut = off + 4;
                 }
                 return off;
             }
         } else {
+            persist_task_pair(off, off + 4);
             if (taskCsflagsOffOut) {
                 *taskCsflagsOffOut = off + 4;
             }
             return off;
         }
+    }
+
+    for (uint32_t off = 0x100; off < 0x700; off += 4) {
+        uint32_t csOff = off + 4;
+        if (!is_plausible_task_pair(off, csOff)) continue;
+        persist_task_pair(off, csOff);
+        if (taskCsflagsOffOut) {
+            *taskCsflagsOffOut = csOff;
+        }
+        return off;
     }
 
     return 0;
