@@ -53,12 +53,27 @@ static void *NXIOKitFrameworkHandle(void) {
     return handle;
 }
 
+static void *NXIOUSBHostFrameworkHandle(void) {
+    static void *handle = NULL;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        handle = dlopen("/System/Library/PrivateFrameworks/IOUSBHost.framework/IOUSBHost", RTLD_LAZY | RTLD_GLOBAL);
+    });
+    return handle;
+}
+
 static CFUUIDRef NXLookupHostUUIDSymbol(const char *symbolName) {
     const CFUUIDRef *uuidPtr = NULL;
 
     void *handle = NXIOKitFrameworkHandle();
     if (handle) {
         uuidPtr = (const CFUUIDRef *)dlsym(handle, symbolName);
+    }
+    if (!uuidPtr) {
+        handle = NXIOUSBHostFrameworkHandle();
+        if (handle) {
+            uuidPtr = (const CFUUIDRef *)dlsym(handle, symbolName);
+        }
     }
     if (!uuidPtr) {
         uuidPtr = (const CFUUIDRef *)dlsym(RTLD_DEFAULT, symbolName);
@@ -89,6 +104,10 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
                                                           SInt32 *plugInScore,
                                                           NSString *logPrefix)
 {
+    *plugInInterface = NULL;
+    *plugInScore = -1;
+
+    NXLog(@"%@: creating plugin with preferred user client", logPrefix);
     kern_return_t kr = IOCreatePlugInInterfaceForService(service,
                                                          preferredUserClient,
                                                          kIOCFPlugInInterfaceID,
@@ -97,11 +116,19 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
 
     if ((kr || !*plugInInterface) && preferredUserClient != fallbackUserClient) {
         NXLog(@"%@: preferred user client plugin failed (%08x), retrying fallback", logPrefix, kr);
+        *plugInInterface = NULL;
+        *plugInScore = -1;
         kr = IOCreatePlugInInterfaceForService(service,
                                                fallbackUserClient,
                                                kIOCFPlugInInterfaceID,
                                                plugInInterface,
                                                plugInScore);
+    }
+
+    if (kr || !*plugInInterface) {
+        NXLog(@"%@: plugin creation failed (%08x) score=%d", logPrefix, kr, (int)*plugInScore);
+    } else {
+        NXLog(@"%@: plugin creation succeeded score=%d", logPrefix, (int)*plugInScore);
     }
 
     return kr;
@@ -231,10 +258,16 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
         static const char * const hostUserClientNames[] = {
             "kIOUSBHostDeviceUserClientTypeID",
             "kIOUSBHostDeviceUserClientTypeID245",
+            "kIOUSBHostDeviceUserClientTypeID300",
+            "kIOUSBHostDeviceUserClientTypeID500",
+            "kIOUSBHostDeviceUserClientTypeID550",
         };
         static const char * const hostInterfaceNames[] = {
             "kIOUSBHostDeviceInterfaceID",
             "kIOUSBHostDeviceInterfaceID245",
+            "kIOUSBHostDeviceInterfaceID300",
+            "kIOUSBHostDeviceInterfaceID500",
+            "kIOUSBHostDeviceInterfaceID550",
         };
         CFUUIDRef hostUserClientTypeID = NXLookupHostUUIDSymbolAny(hostUserClientNames,
                                                                    sizeof(hostUserClientNames) / sizeof(hostUserClientNames[0]),
