@@ -572,9 +572,23 @@ static int prepareIOKitAccess(void) {
 
     kernel_logf("prepareIOKitAccess: proc csflags patched");
 
+    bool hadNonCriticalFailures = false;
+
+    uint32_t oldUid = ds_kread32(self + PROC_UID_OFFSET);
+    uint32_t oldGid = ds_kread32(self + PROC_GID_OFFSET);
+    bool uidPatched = kwrite32_retry(self + PROC_UID_OFFSET, 0, 3);
+    bool gidPatched = kwrite32_retry(self + PROC_GID_OFFSET, 0, 3);
+    uint32_t newUid = ds_kread32(self + PROC_UID_OFFSET);
+    uint32_t newGid = ds_kread32(self + PROC_GID_OFFSET);
+    kernel_logf("prepareIOKitAccess: proc uid before=%u after=%u, gid before=%u after=%u",
+                oldUid, newUid, oldGid, newGid);
+    if (!uidPatched || !gidPatched || newUid != 0 || newGid != 0) {
+        kernel_logf("prepareIOKitAccess: proc uid/gid elevation verify failed (non-critical)");
+        hadNonCriticalFailures = true;
+    }
+
     // Skip mutable cred writes on iPhone17,4/iOS 26: they are not reliable with the current
     // 32-byte write primitive and do not improve the verified csflags/task path.
-    bool hadNonCriticalFailures = false;
     kernel_logf("prepareIOKitAccess: skipping ucred mutations on this device");
 
     uint32_t taskCsOff = 0;

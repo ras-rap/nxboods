@@ -236,6 +236,29 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
     return kr;
 }
 
+static void NXProbeServiceOpenAccess(io_service_t service, NSString *logPrefix) {
+    if (!service) {
+        return;
+    }
+
+    const uint32_t openTypes[] = { 0, 1, 2, 3, 4, 5, 0x100, 0x200 };
+    bool anySuccess = false;
+
+    for (size_t i = 0; i < sizeof(openTypes) / sizeof(openTypes[0]); i++) {
+        io_connect_t conn = IO_OBJECT_NULL;
+        kern_return_t openKr = IOServiceOpen(service, mach_task_self(), openTypes[i], &conn);
+        NXUSBLogf(@"%@: IOServiceOpen(type=0x%x) -> 0x%08x", logPrefix, openTypes[i], openKr);
+        if (openKr == KERN_SUCCESS && conn) {
+            anySuccess = true;
+            IOServiceClose(conn);
+        }
+    }
+
+    if (!anySuccess) {
+        NXUSBLogf(@"%@: all IOServiceOpen probes failed", logPrefix);
+    }
+}
+
 @implementation NXUSBDeviceEnumerator
 
 - (void)dealloc {
@@ -432,6 +455,8 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
 
         // On newer iOS stacks, the usable user client may be exposed on ancestor registry nodes.
         if (kr || !plugInInterface) {
+            NXProbeServiceOpenAccess(service, @"USB: current service access probe");
+
             io_registry_entry_t ancestor = service;
             IOObjectRetain(ancestor);
             for (int depth = 1; depth <= 4 && (kr || !plugInInterface); depth++) {
@@ -445,6 +470,9 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
 
                 NSString *prefix = [NSString stringWithFormat:@"USB: ancestor[%d] service", depth];
                 NSString *registryPrefix = [NSString stringWithFormat:@"USB: ancestor[%d] service plugin type", depth];
+                NSString *openPrefix = [NSString stringWithFormat:@"USB: ancestor[%d] access probe", depth];
+
+                NXProbeServiceOpenAccess(ancestor, openPrefix);
 
                 CFUUIDRef ancestorRegistryUserClientTypeID = NXCopyRegistryPluginTypeUUID(ancestor, registryPrefix);
                 kr = NXCreatePluginForServiceWithFallback(ancestor,
