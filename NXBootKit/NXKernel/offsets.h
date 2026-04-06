@@ -27,6 +27,8 @@ NSString *getkerncache(void);
 void clearkerncachedata(void);
 uint64_t getcsflagsoffset(void);
 uint64_t getucredooffset(void);
+uint64_t gettaskflagsoffset(void);
+uint64_t gettaskcsflagsoffset(void);
 
 #ifdef __cplusplus
 }

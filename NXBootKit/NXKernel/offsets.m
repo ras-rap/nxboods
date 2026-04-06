@@ -18,6 +18,19 @@ static NSString *const kkerncachekey  = @"lara.kernelcache_path";
 static NSString *const kkernprocsize  = @"lara.kernproc_size";
 static NSString *const kcsflagsoffkey = @"lara.csflags_offset";
 static NSString *const kucredoffkey   = @"lara.ucred_offset";
+static NSString *const ktaskflagsoffkey = @"lara.task_flags_offset";
+static NSString *const ktaskcsflagsoffkey = @"lara.task_csflags_offset";
+
+static uint64_t resolve_first_item(const char * const names[], size_t count, const char *label) {
+    for (size_t i = 0; i < count; i++) {
+        uint64_t value = xpf_item_resolve(names[i]);
+        if (value) {
+            printf("resolved %s via %s: 0x%llx\n", label, names[i], value);
+            return value;
+        }
+    }
+    return 0;
+}
 
 static NSString *kerncachepath(void) {
     NSString *docs =
@@ -55,6 +68,23 @@ static bool resolvekernoffsets(NSString *kcpath) {
     uint64_t ucred_off  = xpf_item_resolve("kernelStruct.proc.p_ucred");
     uint64_t csflags_off = xpf_item_resolve("kernelStruct.proc.p_csflags");
 
+    const char * const taskFlagsCandidates[] = {
+        "kernelStruct.task.t_flags",
+        "kernelStruct.task.t_procflags",
+        "kernelStruct.task.flags",
+    };
+    const char * const taskCsflagsCandidates[] = {
+        "kernelStruct.task.t_csflags",
+        "kernelStruct.task.csflags",
+    };
+
+    uint64_t task_flags_off = resolve_first_item(taskFlagsCandidates,
+                                                 sizeof(taskFlagsCandidates) / sizeof(taskFlagsCandidates[0]),
+                                                 "task flags");
+    uint64_t task_csflags_off = resolve_first_item(taskCsflagsCandidates,
+                                                   sizeof(taskCsflagsCandidates) / sizeof(taskCsflagsCandidates[0]),
+                                                   "task csflags");
+
     if (!kernproc || !rootvnode) {
         printf("failed to resolve important kernel symbols\n");
         xpf_stop();
@@ -75,6 +105,8 @@ static bool resolvekernoffsets(NSString *kcpath) {
     printf("procsize: 0x%llx\n", procsize);
     printf("ucred_off: 0x%llx\n", ucred_off);
     printf("csflags_off: 0x%llx\n", csflags_off);
+    printf("task_flags_off: 0x%llx\n", task_flags_off);
+    printf("task_csflags_off: 0x%llx\n", task_csflags_off);
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
@@ -84,6 +116,8 @@ static bool resolvekernoffsets(NSString *kcpath) {
     [defaults setObject:kcpath forKey:kkerncachekey];
     if (ucred_off)  [defaults setObject:@(ucred_off) forKey:kucredoffkey];
     if (csflags_off) [defaults setObject:@(csflags_off) forKey:kcsflagsoffkey];
+    if (task_flags_off) [defaults setObject:@(task_flags_off) forKey:ktaskflagsoffkey];
+    if (task_csflags_off) [defaults setObject:@(task_csflags_off) forKey:ktaskcsflagsoffkey];
 
     [defaults synchronize];
 
@@ -157,6 +191,8 @@ void clearkerncachedata(void) {
     [defaults removeObjectForKey:kkernprocsize];
     [defaults removeObjectForKey:kcsflagsoffkey];
     [defaults removeObjectForKey:kucredoffkey];
+    [defaults removeObjectForKey:ktaskflagsoffkey];
+    [defaults removeObjectForKey:ktaskcsflagsoffkey];
     [defaults synchronize];
 }
 
@@ -167,5 +203,15 @@ uint64_t getcsflagsoffset(void) {
 
 uint64_t getucredooffset(void) {
     NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:kucredoffkey];
+    return n ? n.unsignedLongLongValue : 0;
+}
+
+uint64_t gettaskflagsoffset(void) {
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:ktaskflagsoffkey];
+    return n ? n.unsignedLongLongValue : 0;
+}
+
+uint64_t gettaskcsflagsoffset(void) {
+    NSNumber *n = [[NSUserDefaults standardUserDefaults] objectForKey:ktaskcsflagsoffkey];
     return n ? n.unsignedLongLongValue : 0;
 }

