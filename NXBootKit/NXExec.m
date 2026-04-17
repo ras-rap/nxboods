@@ -490,7 +490,17 @@ BOOL NXExecDesc(struct NXExecDesc const *desc, NSData *relocator, NSData *image,
 }
 
 BOOL NXExec(NXUSBDevice *device, NSData *relocator, NSData *image, NSString **err) {
-    if (!device->_intf || !relocator) {
+    if (!device->_intf) {
+        if (device->_conn) {
+            NXExecSetError(@"USB device is connected via direct IOServiceOpen fallback; "
+                           @"full USB interface is unavailable on this iOS version. "
+                           @"Payload cannot be launched.", err);
+        } else {
+            NXExecSetError(@"USB device interface is not available.", err);
+        }
+        return NO;
+    }
+    if (!relocator) {
         return NO;
     }
     struct NXExecDesc desc = NXExecAcquireDeviceInterface(device->_intf, err);
