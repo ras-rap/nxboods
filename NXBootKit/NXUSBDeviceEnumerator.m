@@ -59,6 +59,17 @@ static void NXUSBLogf(NSString *fmt, ...) {
                                                       userInfo:@{ @"message": msg }];
 }
 
+static NSString *NXDescribeIOReturn(kern_return_t kr) {
+    switch (kr) {
+        case KERN_SUCCESS: return @"kIOReturnSuccess";
+        case 0xe00002be: return @"kIOReturnNoResources";
+        case 0xe00002c1: return @"kIOReturnNotPrivileged";
+        case 0xe00002c7: return @"kIOReturnUnsupported";
+        case 0xe00002e2: return @"kIOReturnNotPermitted";
+        default: return [NSString stringWithFormat:@"0x%08x", kr];
+    }
+}
+
 static void *NXIOKitFrameworkHandle(void) {
     static void *handle = NULL;
     static dispatch_once_t onceToken;
@@ -217,7 +228,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
                                                          plugInScore);
 
     if ((kr || !*plugInInterface) && preferredUserClient != fallbackUserClient) {
-        NXUSBLogf(@"%@: preferred user client plugin failed (%08x), retrying fallback", logPrefix, kr);
+        NXUSBLogf(@"%@: preferred user client plugin failed (%08x, %@), retrying fallback", logPrefix, kr, NXDescribeIOReturn(kr));
         *plugInInterface = NULL;
         *plugInScore = -1;
         kr = IOCreatePlugInInterfaceForService(service,
@@ -228,7 +239,7 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
     }
 
     if (kr || !*plugInInterface) {
-        NXUSBLogf(@"%@: plugin creation failed (%08x) score=%d", logPrefix, kr, (int)*plugInScore);
+        NXUSBLogf(@"%@: plugin creation failed (%08x, %@) score=%d", logPrefix, kr, NXDescribeIOReturn(kr), (int)*plugInScore);
     } else {
         NXUSBLogf(@"%@: plugin creation succeeded score=%d", logPrefix, (int)*plugInScore);
     }
@@ -247,7 +258,11 @@ static void NXProbeServiceOpenAccess(io_service_t service, NSString *logPrefix) 
     for (size_t i = 0; i < sizeof(openTypes) / sizeof(openTypes[0]); i++) {
         io_connect_t conn = IO_OBJECT_NULL;
         kern_return_t openKr = IOServiceOpen(service, mach_task_self(), openTypes[i], &conn);
-        NXUSBLogf(@"%@: IOServiceOpen(type=0x%x) -> 0x%08x", logPrefix, openTypes[i], openKr);
+        NXUSBLogf(@"%@: IOServiceOpen(type=0x%x) -> 0x%08x (%@)",
+              logPrefix,
+              openTypes[i],
+              openKr,
+              NXDescribeIOReturn(openKr));
         if (openKr == KERN_SUCCESS && conn) {
             anySuccess = true;
             IOServiceClose(conn);
