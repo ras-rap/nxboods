@@ -541,7 +541,8 @@ static kern_return_t NXTryServiceOpenAccess(io_service_t service,
                         fallbackConnKr = KERN_SUCCESS;
                     } else if (probeConn) {
                         IOServiceClose(probeConn);
-                    } else if (fallbackConnKr != KERN_SUCCESS) {
+                    } else if (fallbackConnKr != KERN_SUCCESS &&
+                               fallbackConnKr != (kern_return_t)kIOReturnNotPermitted) {
                         fallbackConnKr = probeKr;
                     }
                 }

