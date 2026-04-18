@@ -283,7 +283,12 @@ static kern_return_t NXTryServiceOpenAccess(io_service_t service,
                 IOServiceClose(conn);
             }
         } else {
-            lastKr = openKr;
+            // Prefer kIOReturnNotPermitted over other errors: it means the service exists and
+            // responded (access denied) rather than the type being unsupported entirely. This
+            // surfaces the most actionable error code in the final diagnostic message.
+            if (lastKr != (kern_return_t)kIOReturnNotPermitted) {
+                lastKr = openKr;
+            }
         }
     }
 
