@@ -247,12 +247,23 @@ static kern_return_t NXCreatePluginForServiceWithFallback(io_service_t service,
     return kr;
 }
 
-static void NXProbeServiceOpenAccess(io_service_t service, NSString *logPrefix) {
+// Returns KERN_SUCCESS and sets *outConn/*outOpenType to the first successful open type.
+// The caller is responsible for closing *outConn via IOServiceClose when done.
+// If no open type succeeds, *outConn is IO_OBJECT_NULL and the last error is returned.
+static kern_return_t NXTryServiceOpenAccess(io_service_t service,
+                                             NSString *logPrefix,
+                                             uint32_t *outOpenType,
+                                             io_connect_t *outConn)
+{
+    *outOpenType = 0;
+    *outConn = IO_OBJECT_NULL;
+
     if (!service) {
-        return;
+        return kIOReturnBadArgument;
     }
 
     const uint32_t openTypes[] = { 0, 1, 2, 3, 4, 5, 0x100, 0x200 };
+    kern_return_t lastKr = kIOReturnError;
     bool anySuccess = false;
 
     for (size_t i = 0; i < sizeof(openTypes) / sizeof(openTypes[0]); i++) {
@@ -264,14 +275,29 @@ static void NXProbeServiceOpenAccess(io_service_t service, NSString *logPrefix) 
               openKr,
               NXDescribeIOReturn(openKr));
         if (openKr == KERN_SUCCESS && conn) {
-            anySuccess = true;
-            IOServiceClose(conn);
+            if (!anySuccess) {
+                *outOpenType = openTypes[i];
+                *outConn = conn;
+                anySuccess = true;
+            } else {
+                IOServiceClose(conn);
+            }
+        } else {
+            // Prefer kIOReturnNotPermitted over other errors: it means the service exists and
+            // responded (access denied) rather than the type being unsupported entirely. This
+            // surfaces the most actionable error code in the final diagnostic message.
+            if (lastKr != (kern_return_t)kIOReturnNotPermitted) {
+                lastKr = openKr;
+            }
         }
     }
 
     if (!anySuccess) {
         NXUSBLogf(@"%@: all IOServiceOpen probes failed", logPrefix);
+        return lastKr;
     }
+
+    return KERN_SUCCESS;
 }
 
 @implementation NXUSBDeviceEnumerator
@@ -468,9 +494,26 @@ static void NXProbeServiceOpenAccess(io_service_t service, NSString *logPrefix) 
                                                       @"USB: current service (registry UUID)");
         }
 
+        // IOServiceOpen fallback: populated during ancestor walk when plugin creation fails.
+        io_connect_t fallbackConn = IO_OBJECT_NULL;
+        uint32_t fallbackOpenType = 0;
+        kern_return_t fallbackConnKr = kIOReturnError;
+
         // On newer iOS stacks, the usable user client may be exposed on ancestor registry nodes.
         if (kr || !plugInInterface) {
-            NXProbeServiceOpenAccess(service, @"USB: current service access probe");
+            // Try direct IOServiceOpen on the current service first.
+            {
+                io_connect_t probeConn = IO_OBJECT_NULL;
+                uint32_t probeType = 0;
+                kern_return_t probeKr = NXTryServiceOpenAccess(service, @"USB: current service access probe", &probeType, &probeConn);
+                if (probeKr == KERN_SUCCESS && probeConn) {
+                    fallbackConn = probeConn;
+                    fallbackOpenType = probeType;
+                    fallbackConnKr = KERN_SUCCESS;
+                } else {
+                    fallbackConnKr = probeKr;
+                }
+            }
 
             io_registry_entry_t ancestor = service;
             IOObjectRetain(ancestor);
@@ -487,7 +530,22 @@ static void NXProbeServiceOpenAccess(io_service_t service, NSString *logPrefix) 
                 NSString *registryPrefix = [NSString stringWithFormat:@"USB: ancestor[%d] service plugin type", depth];
                 NSString *openPrefix = [NSString stringWithFormat:@"USB: ancestor[%d] access probe", depth];
 
-                NXProbeServiceOpenAccess(ancestor, openPrefix);
+                {
+                    io_connect_t probeConn = IO_OBJECT_NULL;
+                    uint32_t probeType = 0;
+                    kern_return_t probeKr = NXTryServiceOpenAccess(ancestor, openPrefix, &probeType, &probeConn);
+                    // Keep the first successful connection found (current service takes priority over ancestors).
+                    if (probeKr == KERN_SUCCESS && probeConn && !fallbackConn) {
+                        fallbackConn = probeConn;
+                        fallbackOpenType = probeType;
+                        fallbackConnKr = KERN_SUCCESS;
+                    } else if (probeConn) {
+                        IOServiceClose(probeConn);
+                    } else if (fallbackConnKr != KERN_SUCCESS &&
+                               fallbackConnKr != (kern_return_t)kIOReturnNotPermitted) {
+                        fallbackConnKr = probeKr;
+                    }
+                }
 
                 CFUUIDRef ancestorRegistryUserClientTypeID = NXCopyRegistryPluginTypeUUID(ancestor, registryPrefix);
                 kr = NXCreatePluginForServiceWithFallback(ancestor,
@@ -519,43 +577,66 @@ static void NXProbeServiceOpenAccess(io_service_t service, NSString *logPrefix) 
             CFRelease(registryUserClientTypeID);
         }
 
+        BOOL usingFallbackPath = NO;
         if (kr || !plugInInterface) {
-            ERR(@"Could not create USB device plugin instance (%08x) class=%s score=%d", kr, ioClassName, (int)plugInScore);
-            goto cleanup;
+            if (fallbackConn) {
+                // Plugin creation failed on all paths, but IOServiceOpen succeeded.
+                // Proceed with the direct connection; USB pipe operations will not be available.
+                NXUSBLogf(@"USB: Plugin creation failed (%08x, %@) class=%s score=%d; "
+                          @"using IOServiceOpen fallback connection (type=0x%x)",
+                          kr, NXDescribeIOReturn(kr), ioClassName, (int)plugInScore, fallbackOpenType);
+                device->_conn = fallbackConn;
+                device->_connOpenType = fallbackOpenType;
+                fallbackConn = IO_OBJECT_NULL;
+                usingFallbackPath = YES;
+            } else {
+                ERR(@"Could not create USB device plugin instance (%08x, %@) class=%s score=%d; "
+                    @"IOServiceOpen fallback also failed (%08x, %@). "
+                    @"Check device entitlements and IOKit USB stack.",
+                    kr, NXDescribeIOReturn(kr), ioClassName, (int)plugInScore,
+                    fallbackConnKr, NXDescribeIOReturn(fallbackConnKr));
+                goto cleanup;
+            }
+        } else if (fallbackConn) {
+            // Plugin succeeded; discard the fallback connection that was accumulated during probing.
+            IOServiceClose(fallbackConn);
+            fallbackConn = IO_OBJECT_NULL;
         }
 
-        kr = (*plugInInterface)->QueryInterface(plugInInterface,
-                                                CFUUIDGetUUIDBytes(kNXUSBDeviceInterfaceUUID),
-                                                (void *)&device->_intf);
-
-        if ((kr || !device->_intf) && classIsHostDevice && hostInterfaceID) {
-            NXUSBLogf(@"USB: legacy device interface query failed (%08x), retrying host interface UUID", kr);
+        if (!usingFallbackPath) {
             kr = (*plugInInterface)->QueryInterface(plugInInterface,
-                                                    CFUUIDGetUUIDBytes(hostInterfaceID),
+                                                    CFUUIDGetUUIDBytes(kNXUSBDeviceInterfaceUUID),
                                                     (void *)&device->_intf);
-        }
 
-        if ((kr || !device->_intf) && legacyInterfaceID) {
-            NXUSBLogf(@"USB: host/compile-time interface query failed (%08x), retrying legacy interface UUID", kr);
-            kr = (*plugInInterface)->QueryInterface(plugInInterface,
-                                                    CFUUIDGetUUIDBytes(legacyInterfaceID),
-                                                    (void *)&device->_intf);
-        }
+            if ((kr || !device->_intf) && classIsHostDevice && hostInterfaceID) {
+                NXUSBLogf(@"USB: legacy device interface query failed (%08x), retrying host interface UUID", kr);
+                kr = (*plugInInterface)->QueryInterface(plugInInterface,
+                                                        CFUUIDGetUUIDBytes(hostInterfaceID),
+                                                        (void *)&device->_intf);
+            }
 
-        NXCOMCall(plugInInterface, Release);
-        plugInInterface = NULL;
-        if (kr || !device->_intf) {
-            ERR(@"Could not get USB device interface (%08x)", kr);
-            goto cleanup;
-        }
+            if ((kr || !device->_intf) && legacyInterfaceID) {
+                NXUSBLogf(@"USB: host/compile-time interface query failed (%08x), retrying legacy interface UUID", kr);
+                kr = (*plugInInterface)->QueryInterface(plugInInterface,
+                                                        CFUUIDGetUUIDBytes(legacyInterfaceID),
+                                                        (void *)&device->_intf);
+            }
 
-        // fetch location ID
-        kr = NXCOMCall(device->_intf, GetLocationID, &device->_locationID);
-        if (kr != KERN_SUCCESS) {
-            ERR(@"GetLocationID failed with code %08x, skipping device\n", kr);
-            goto cleanup;
+            NXCOMCall(plugInInterface, Release);
+            plugInInterface = NULL;
+            if (kr || !device->_intf) {
+                ERR(@"Could not get USB device interface (%08x)", kr);
+                goto cleanup;
+            }
+
+            // fetch location ID
+            kr = NXCOMCall(device->_intf, GetLocationID, &device->_locationID);
+            if (kr != KERN_SUCCESS) {
+                ERR(@"GetLocationID failed with code %08x, skipping device\n", kr);
+                goto cleanup;
+            }
+            NXUSBLogf(@"USB: Device location ID: 0x%lx", (unsigned long)device->_locationID);
         }
-        NXUSBLogf(@"USB: Device location ID: 0x%lx", (unsigned long)device->_locationID);
 
         // register for device events
         kr = IOServiceAddInterestNotification(self.notifyPort,

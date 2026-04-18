@@ -10,6 +10,8 @@ NXBOOTKIT_PUBLIC
 @interface NXUSBDevice : NSObject {
 @public
     NXUSBDeviceInterface **_intf;
+    io_connect_t _conn;
+    uint32_t _connOpenType;
     UInt32 _locationID;
     io_object_t _notification;
 }

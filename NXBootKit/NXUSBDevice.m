@@ -14,6 +14,12 @@
         _intf = NULL;
     }
 
+    if (_conn) {
+        NXLog(@"USB: Closing direct connection for device `%@'", self.name);
+        IOServiceClose(_conn);
+        _conn = IO_OBJECT_NULL;
+    }
+
     if (_notification) {
         NXLog(@"USB: Unsubscribing from notifications for device `%@'", self.name);
         IOObjectRelease(_notification);
